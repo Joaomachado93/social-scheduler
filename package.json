@@ -1,0 +1,12 @@
+{
+  "name": "social-scheduler",
+  "private": true,
+  "scripts": {
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev": "pnpm run dev:backend & pnpm run dev:frontend"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["bcrypt", "better-sqlite3", "esbuild", "sharp"]
+  }
+}
