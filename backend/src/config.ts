@@ -9,6 +9,9 @@ dotenv.config({ path: resolve(__dirname, '../../.env') });
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   jwtSecret: process.env.JWT_SECRET || 'dev-secret',
+  nodeEnv: process.env.NODE_ENV || 'development',
+  appUrl: process.env.APP_URL || 'http://localhost:5173',
+  apiUrl: process.env.API_URL || 'http://localhost:3001',
 
   meta: {
     appId: process.env.META_APP_ID || '',

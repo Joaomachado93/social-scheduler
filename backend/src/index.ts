@@ -9,10 +9,14 @@ import { platformRoutes } from './routes/platforms.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { startScheduler } from './services/scheduler.js';
 import { mkdirSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = Fastify({ logger: true });
 
-await app.register(cors, { origin: 'http://localhost:5173', credentials: true });
+await app.register(cors, { origin: config.appUrl, credentials: true });
 
 // Serve uploaded files
 mkdirSync(config.paths.uploads, { recursive: true });
@@ -31,6 +35,23 @@ await app.register(dashboardRoutes);
 
 // Health check
 app.get('/api/health', () => ({ status: 'ok' }));
+
+// In production, serve frontend build
+if (config.nodeEnv === 'production') {
+  const frontendDist = resolve(__dirname, '../../frontend/dist');
+  await app.register(fastifyStatic, {
+    root: frontendDist,
+    prefix: '/',
+    decorateReply: false,
+  });
+
+  app.setNotFoundHandler((request, reply) => {
+    if (request.url.startsWith('/api/')) {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+    return reply.sendFile('index.html', frontendDist);
+  });
+}
 
 // Start scheduler
 startScheduler();

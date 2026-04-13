@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import { pipeline } from 'stream/promises';
-import { createWriteStream, mkdirSync, unlinkSync, existsSync } from 'fs';
-import { resolve, extname } from 'path';
+import { createWriteStream, createReadStream, mkdirSync, unlinkSync, existsSync, readFileSync } from 'fs';
+import { resolve, extname, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
 import { media } from '../db/schema.js';
@@ -84,7 +84,7 @@ export async function mediaRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'File not found' });
     }
 
-    return reply.sendFile(filePath);
+    return reply.type(record.mimeType).send(createReadStream(filePath));
   });
 
   app.delete('/api/media/:id', async (request, reply) => {
@@ -97,6 +97,63 @@ export async function mediaRoutes(app: FastifyInstance) {
     try { if (record.watermarkedPath && existsSync(record.watermarkedPath)) unlinkSync(record.watermarkedPath); } catch {}
 
     db.delete(media).where(eq(media.id, parseInt(id))).run();
+    return { success: true };
+  });
+
+  // GET /api/settings/logo - returns current logo info
+  app.get('/api/settings/logo', async (request, reply) => {
+    const logoPath = config.paths.watermark;
+    if (!existsSync(logoPath)) {
+      return { hasLogo: false };
+    }
+    return { hasLogo: true };
+  });
+
+  // GET /api/settings/logo/file - serve the logo file
+  app.get('/api/settings/logo/file', async (request, reply) => {
+    const logoPath = config.paths.watermark;
+    if (!existsSync(logoPath)) {
+      return reply.status(404).send({ error: 'No logo uploaded' });
+    }
+    return reply.type('image/png').send(createReadStream(logoPath));
+  });
+
+  // POST /api/settings/logo - upload new logo
+  app.post('/api/settings/logo', async (request, reply) => {
+    const file = await request.file();
+    if (!file) {
+      return reply.status(400).send({ error: 'No file provided' });
+    }
+
+    const ext = extname(file.filename).toLowerCase();
+    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+      return reply.status(400).send({ error: 'Logo must be an image (PNG, JPG, WEBP)' });
+    }
+
+    // Save as logo.png in watermark dir
+    const logoDir = dirname(config.paths.watermark);
+    mkdirSync(logoDir, { recursive: true });
+
+    // Convert to PNG and save
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.file) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // Use sharp to convert to PNG
+    const sharp = (await import('sharp')).default;
+    await sharp(buffer).png().toFile(config.paths.watermark);
+
+    return { success: true, message: 'Logo updated' };
+  });
+
+  // DELETE /api/settings/logo - remove logo
+  app.delete('/api/settings/logo', async (request, reply) => {
+    const logoPath = config.paths.watermark;
+    if (existsSync(logoPath)) {
+      unlinkSync(logoPath);
+    }
     return { success: true };
   });
 }

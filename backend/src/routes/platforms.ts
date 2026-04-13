@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { authGuard, JwtPayload, signToken } from '../middleware/auth.js';
 import { getMetaAuthUrl, exchangeMetaCode } from '../services/oauth/meta.js';
 import { getGoogleAuthUrl, exchangeGoogleCode } from '../services/oauth/google.js';
+import { config } from '../config.js';
 
 export async function platformRoutes(app: FastifyInstance) {
   // List connected platforms (auth required)
@@ -66,10 +67,10 @@ export async function platformRoutes(app: FastifyInstance) {
         }).run();
       }
 
-      return reply.redirect('http://localhost:5173/platforms?connected=facebook');
+      return reply.redirect(`${config.appUrl}/platforms?connected=facebook`);
     } catch (err: any) {
       console.error('Meta OAuth error:', err.message);
-      return reply.redirect('http://localhost:5173/platforms?error=meta_auth_failed');
+      return reply.redirect(`${config.appUrl}/platforms?error=meta_auth_failed`);
     }
   });
 
@@ -99,10 +100,10 @@ export async function platformRoutes(app: FastifyInstance) {
         tokenExpires: account.tokenExpires,
       }).run();
 
-      return reply.redirect('http://localhost:5173/platforms?connected=youtube');
+      return reply.redirect(`${config.appUrl}/platforms?connected=youtube`);
     } catch (err: any) {
       console.error('Google OAuth error:', err.message);
-      return reply.redirect('http://localhost:5173/platforms?error=google_auth_failed');
+      return reply.redirect(`${config.appUrl}/platforms?error=google_auth_failed`);
     }
   });
 

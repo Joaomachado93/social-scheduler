@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { usePostsStore, type Post } from '../stores/posts.js';
+import { RouterLink } from 'vue-router';
 import StatusBadge from '../components/StatusBadge.vue';
 
 const store = usePostsStore();
@@ -91,12 +92,15 @@ watch([currentYear, currentMonth], loadMonth);
           :class="cell.day ? 'bg-white' : 'bg-gray-50'"
         >
           <span v-if="cell.day" class="text-sm text-gray-600">{{ cell.day }}</span>
-          <div v-for="post in cell.posts" :key="post.id" class="mt-1">
-            <div class="text-xs p-1 rounded bg-blue-50 truncate flex items-center gap-1">
-              <StatusBadge :status="post.status" />
-              <span class="truncate">{{ post.caption?.slice(0, 20) || '(sem texto)' }}</span>
-            </div>
-          </div>
+          <RouterLink
+            v-for="post in cell.posts"
+            :key="post.id"
+            :to="`/posts/${post.id}`"
+            class="mt-1 block text-xs p-1 rounded bg-blue-50 truncate flex items-center gap-1 hover:bg-blue-100 transition-colors"
+          >
+            <StatusBadge :status="post.status" />
+            <span class="truncate">{{ post.caption?.slice(0, 20) || '(sem texto)' }}</span>
+          </RouterLink>
         </div>
       </div>
     </div>

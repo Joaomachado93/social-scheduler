@@ -1,8 +1,10 @@
 node_modules/
 dist/
-.env
 *.db
+*.db-shm
+*.db-wal
+.env
 backend/uploads/
+backend/watermark/logo.png
 backend/data/
-.DS_Store
-backend/.pnpmrc.json
+*.pnpmrc.json

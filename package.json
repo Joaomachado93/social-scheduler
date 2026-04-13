@@ -4,7 +4,10 @@
   "scripts": {
     "dev:backend": "pnpm --filter backend dev",
     "dev:frontend": "pnpm --filter frontend dev",
-    "dev": "pnpm run dev:backend & pnpm run dev:frontend"
+    "dev": "pnpm run dev:backend & pnpm run dev:frontend",
+    "build": "pnpm --filter frontend build && pnpm --filter backend build",
+    "start": "NODE_ENV=production node backend/dist/index.js",
+    "test": "pnpm --filter backend test && pnpm --filter frontend test"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["bcrypt", "better-sqlite3", "esbuild", "sharp"]

@@ -25,14 +25,34 @@ const router = createRouter({
           component: () => import('../pages/CalendarPage.vue'),
         },
         {
+          path: 'posts',
+          name: 'posts',
+          component: () => import('../pages/PostsListPage.vue'),
+        },
+        {
           path: 'posts/create',
           name: 'create-post',
           component: () => import('../pages/CreatePostPage.vue'),
         },
         {
+          path: 'posts/:id/edit',
+          name: 'edit-post',
+          component: () => import('../pages/EditPostPage.vue'),
+        },
+        {
+          path: 'posts/:id',
+          name: 'post-detail',
+          component: () => import('../pages/PostDetailPage.vue'),
+        },
+        {
           path: 'platforms',
           name: 'platforms',
           component: () => import('../pages/PlatformsPage.vue'),
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('../pages/SettingsPage.vue'),
         },
       ],
     },

@@ -1,23 +1,35 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { usePostsStore } from '../stores/posts.js';
+import { useToast } from '../composables/useToast.js';
 import PostCard from '../components/PostCard.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 
 const store = usePostsStore();
+const toast = useToast();
 
 onMounted(async () => {
   await Promise.all([store.fetchStats(), store.fetchUpcoming(), store.fetchRecent()]);
 });
 
 async function handleDelete(id: number) {
-  await store.deletePost(id);
-  await Promise.all([store.fetchStats(), store.fetchUpcoming(), store.fetchRecent()]);
+  try {
+    await store.deletePost(id);
+    await Promise.all([store.fetchStats(), store.fetchUpcoming(), store.fetchRecent()]);
+    toast.success('Post eliminado');
+  } catch {
+    toast.error('Erro ao eliminar post');
+  }
 }
 
 async function handlePublishNow(id: number) {
-  await store.publishNow(id);
-  await Promise.all([store.fetchStats(), store.fetchUpcoming(), store.fetchRecent()]);
+  try {
+    await store.publishNow(id);
+    await Promise.all([store.fetchStats(), store.fetchUpcoming(), store.fetchRecent()]);
+    toast.success('Post publicado');
+  } catch {
+    toast.error('Erro ao publicar post');
+  }
 }
 </script>
 

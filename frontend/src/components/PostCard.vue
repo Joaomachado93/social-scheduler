@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { RouterLink } from 'vue-router';
 import StatusBadge from './StatusBadge.vue';
 import type { Post } from '../stores/posts.js';
 
@@ -21,19 +22,30 @@ const truncatedCaption = computed(() => {
   const cap = props.post.caption || '';
   return cap.length > 100 ? cap.slice(0, 100) + '...' : cap;
 });
+
+const isEditable = computed(() =>
+  ['draft', 'scheduled'].includes(props.post.status)
+);
 </script>
 
 <template>
   <div class="bg-white rounded-xl shadow p-5 flex flex-col gap-3">
-    <div class="flex items-start justify-between">
+    <RouterLink :to="`/posts/${post.id}`" class="flex items-start justify-between hover:opacity-80 transition-opacity">
       <div class="flex-1">
         <p class="text-sm text-gray-500">{{ formattedDate }}</p>
         <p class="mt-1 text-gray-800">{{ truncatedCaption || '(sem texto)' }}</p>
       </div>
       <StatusBadge :status="post.status" />
-    </div>
+    </RouterLink>
 
     <div class="flex gap-2 mt-auto">
+      <RouterLink
+        v-if="isEditable"
+        :to="`/posts/${post.id}/edit`"
+        class="px-3 py-1.5 text-xs bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200"
+      >
+        Editar
+      </RouterLink>
       <button
         v-if="post.status === 'scheduled' || post.status === 'failed'"
         @click="emit('publishNow', post.id)"
@@ -42,7 +54,7 @@ const truncatedCaption = computed(() => {
         Publicar agora
       </button>
       <button
-        v-if="post.status === 'scheduled' || post.status === 'draft'"
+        v-if="isEditable"
         @click="emit('delete', post.id)"
         class="px-3 py-1.5 text-xs bg-red-100 text-red-600 rounded-lg hover:bg-red-200"
       >

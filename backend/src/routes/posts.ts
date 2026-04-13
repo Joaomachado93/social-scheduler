@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
 import { posts, postPlatforms, media, platformAccounts } from '../db/schema.js';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
+import { publishLogs } from '../db/schema.js';
 import { authGuard, JwtPayload } from '../middleware/auth.js';
 
 export async function postRoutes(app: FastifyInstance) {
@@ -42,7 +43,18 @@ export async function postRoutes(app: FastifyInstance) {
 
     if (!post) return reply.status(404).send({ error: 'Post not found' });
 
-    const platforms = db.select().from(postPlatforms)
+    const platforms = db.select({
+      id: postPlatforms.id,
+      postId: postPlatforms.postId,
+      platformAccountId: postPlatforms.platformAccountId,
+      status: postPlatforms.status,
+      platformPostId: postPlatforms.platformPostId,
+      errorMessage: postPlatforms.errorMessage,
+      publishedAt: postPlatforms.publishedAt,
+      platform: platformAccounts.platform,
+      accountName: platformAccounts.accountName,
+    }).from(postPlatforms)
+      .innerJoin(platformAccounts, eq(postPlatforms.platformAccountId, platformAccounts.id))
       .where(eq(postPlatforms.postId, postId)).all();
 
     const mediaFiles = db.select().from(media)
@@ -184,5 +196,24 @@ export async function postRoutes(app: FastifyInstance) {
     await publishPost(post);
 
     return db.select().from(posts).where(eq(posts.id, postId)).get();
+  });
+
+  // Get publish logs for a post
+  app.get('/api/posts/:id/logs', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
+    const { id } = request.params as { id: string };
+    const postId = parseInt(id);
+
+    // Verify ownership
+    const post = db.select().from(posts)
+      .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
+      .get();
+
+    if (!post) return reply.status(404).send({ error: 'Post not found' });
+
+    return db.select().from(publishLogs)
+      .where(eq(publishLogs.postId, postId))
+      .orderBy(desc(publishLogs.createdAt))
+      .all();
   });
 }
