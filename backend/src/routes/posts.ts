@@ -64,20 +64,23 @@ export async function postRoutes(app: FastifyInstance) {
   });
 
   // Create post
-  app.post('/api/posts', async (request) => {
+  app.post('/api/posts', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const body = request.body as {
       caption: string;
       scheduledAt: string;
       platformAccountIds: number[];
       mediaIds: number[];
+      status?: 'scheduled' | 'draft';
     };
+
+    const status = body.status === 'draft' ? 'draft' : 'scheduled';
 
     const post = db.insert(posts).values({
       userId: user.userId,
       caption: body.caption,
       scheduledAt: body.scheduledAt,
-      status: 'scheduled',
+      status,
     }).returning().get();
 
     // Link platforms
@@ -113,6 +116,7 @@ export async function postRoutes(app: FastifyInstance) {
       scheduledAt?: string;
       platformAccountIds?: number[];
       mediaIds?: number[];
+      status?: 'scheduled' | 'draft';
     };
 
     const existing = db.select().from(posts)
@@ -127,6 +131,9 @@ export async function postRoutes(app: FastifyInstance) {
     const updates: any = { updatedAt: new Date().toISOString() };
     if (body.caption !== undefined) updates.caption = body.caption;
     if (body.scheduledAt !== undefined) updates.scheduledAt = body.scheduledAt;
+    if (body.status && ['draft', 'scheduled'].includes(body.status)) {
+      updates.status = body.status;
+    }
 
     db.update(posts).set(updates).where(eq(posts.id, postId)).run();
 
@@ -196,6 +203,41 @@ export async function postRoutes(app: FastifyInstance) {
     await publishPost(post);
 
     return db.select().from(posts).where(eq(posts.id, postId)).get();
+  });
+
+  // Duplicate post — clones caption, platform links, and media links as a new draft
+  // scheduled +1h from now. Returns the new post row.
+  app.post('/api/posts/:id/duplicate', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
+    const { id } = request.params as { id: string };
+    const postId = parseInt(id);
+
+    const source = db.select().from(posts)
+      .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
+      .get();
+
+    if (!source) return reply.status(404).send({ error: 'Post not found' });
+
+    const newScheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const clone = db.insert(posts).values({
+      userId: user.userId,
+      caption: source.caption,
+      scheduledAt: newScheduledAt,
+      status: 'draft',
+    }).returning().get();
+
+    // Clone platform links (status resets to 'pending')
+    const sourcePlatforms = db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, postId)).all();
+    for (const pp of sourcePlatforms) {
+      db.insert(postPlatforms).values({
+        postId: clone.id,
+        platformAccountId: pp.platformAccountId,
+      }).run();
+    }
+
+    return clone;
   });
 
   // Get publish logs for a post

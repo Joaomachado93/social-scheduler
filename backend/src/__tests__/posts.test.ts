@@ -147,4 +147,69 @@ describe('Posts Data Layer', () => {
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0].caption).toBe('Scheduled');
   });
+
+  it('creates a draft post distinct from scheduled', () => {
+    const draft = db.insert(posts).values({
+      userId: 1, caption: 'Work in progress', scheduledAt: '2026-04-15T10:00:00', status: 'draft',
+    }).returning().get();
+
+    expect(draft.status).toBe('draft');
+    // Scheduler only picks 'scheduled', so drafts must stay invisible
+    const schedulerQueue = db.select().from(posts).where(eq(posts.status, 'scheduled')).all();
+    expect(schedulerQueue).toHaveLength(0);
+  });
+
+  it('promotes a draft to scheduled via status update', () => {
+    db.insert(posts).values({
+      userId: 1, caption: 'Draft', scheduledAt: '2026-04-15T10:00:00', status: 'draft',
+    }).run();
+
+    db.update(posts).set({ status: 'scheduled', updatedAt: new Date().toISOString() })
+      .where(eq(posts.id, 1)).run();
+
+    const updated = db.select().from(posts).where(eq(posts.id, 1)).get();
+    expect(updated?.status).toBe('scheduled');
+  });
+
+  it('duplicates a post as draft with fresh platform links', () => {
+    const source = db.insert(posts).values({
+      userId: 1, caption: 'Original caption', scheduledAt: '2026-04-15T10:00:00', status: 'published',
+    }).returning().get();
+
+    db.insert(postPlatforms).values({
+      postId: source.id, platformAccountId: 1, status: 'published', platformPostId: 'remote-1',
+    }).run();
+
+    // Clone logic: new post with status=draft, copy caption, copy platform links (reset status)
+    const newScheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const clone = db.insert(posts).values({
+      userId: source.userId,
+      caption: source.caption,
+      scheduledAt: newScheduledAt,
+      status: 'draft',
+    }).returning().get();
+
+    const sourcePlatforms = db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, source.id)).all();
+    for (const pp of sourcePlatforms) {
+      db.insert(postPlatforms).values({
+        postId: clone.id,
+        platformAccountId: pp.platformAccountId,
+      }).run();
+    }
+
+    expect(clone.id).not.toBe(source.id);
+    expect(clone.caption).toBe(source.caption);
+    expect(clone.status).toBe('draft');
+
+    const clonedPlatforms = db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, clone.id)).all();
+    expect(clonedPlatforms).toHaveLength(1);
+    // Platform status must reset — not inherit source's 'published' state
+    expect(clonedPlatforms[0].status).toBe('pending');
+    expect(clonedPlatforms[0].platformPostId).toBeNull();
+
+    // Original must remain intact
+    expect(db.select().from(posts).where(eq(posts.id, source.id)).get()?.status).toBe('published');
+  });
 });

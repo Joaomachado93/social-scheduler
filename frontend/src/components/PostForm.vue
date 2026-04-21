@@ -20,13 +20,15 @@ const props = withDefaults(defineProps<{
   };
   submitLabel?: string;
   submittingLabel?: string;
+  allowDraft?: boolean;
 }>(), {
   submitLabel: 'Agendar Post',
   submittingLabel: 'A guardar...',
+  allowDraft: false,
 });
 
 const emit = defineEmits<{
-  submit: [data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[] }];
+  submit: [data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[]; status?: 'scheduled' | 'draft' }];
 }>();
 
 const platformsStore = usePlatformsStore();
@@ -67,16 +69,27 @@ const canSubmit = computed(() =>
 );
 
 async function handleSubmit() {
+  doSubmit('scheduled');
+}
+
+async function handleSaveDraft() {
+  doSubmit('draft');
+}
+
+function doSubmit(status: 'scheduled' | 'draft') {
   error.value = '';
   submitting.value = true;
 
   try {
-    const scheduledAt = `${scheduledDate.value}T${scheduledTime.value}:00`;
+    const date = scheduledDate.value || new Date().toISOString().split('T')[0];
+    const time = scheduledTime.value || '10:00';
+    const scheduledAt = `${date}T${time}:00`;
     emit('submit', {
       caption: caption.value,
       scheduledAt,
       platformAccountIds: selectedPlatformIds.value,
       mediaIds: mediaFiles.value.map(f => f.id),
+      status,
     });
   } catch (e: any) {
     error.value = e.message || 'Erro inesperado';
@@ -180,12 +193,23 @@ defineExpose({ error, submitting });
     </div>
 
     <!-- Submit -->
-    <button
-      type="submit"
-      :disabled="!canSubmit || submitting"
-      class="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-    >
-      {{ submitting ? submittingLabel : submitLabel }}
-    </button>
+    <div class="flex gap-3">
+      <button
+        v-if="allowDraft"
+        type="button"
+        :disabled="submitting"
+        @click="handleSaveDraft"
+        class="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+      >
+        Guardar como rascunho
+      </button>
+      <button
+        type="submit"
+        :disabled="!canSubmit || submitting"
+        class="flex-1 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+      >
+        {{ submitting ? submittingLabel : submitLabel }}
+      </button>
+    </div>
   </form>
 </template>

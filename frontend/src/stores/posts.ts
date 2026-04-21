@@ -41,7 +41,7 @@ export const usePostsStore = defineStore('posts', () => {
     return data;
   }
 
-  async function createPost(body: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[] }) {
+  async function createPost(body: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[]; status?: 'scheduled' | 'draft' }) {
     const { data } = await axios.post('/api/posts', body);
     return data;
   }
@@ -58,6 +58,11 @@ export const usePostsStore = defineStore('posts', () => {
 
   async function publishNow(id: number) {
     const { data } = await axios.post(`/api/posts/${id}/publish-now`);
+    return data;
+  }
+
+  async function duplicatePost(id: number): Promise<Post> {
+    const { data } = await axios.post(`/api/posts/${id}/duplicate`);
     return data;
   }
 
@@ -83,7 +88,7 @@ export const usePostsStore = defineStore('posts', () => {
 
   return {
     posts, stats, upcoming, recent, loading,
-    fetchPosts, fetchPost, createPost, updatePost, deletePost, publishNow,
+    fetchPosts, fetchPost, createPost, updatePost, deletePost, publishNow, duplicatePost,
     fetchStats, fetchUpcoming, fetchRecent, fetchCalendar,
   };
 });

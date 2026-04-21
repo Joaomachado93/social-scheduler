@@ -118,6 +118,34 @@ describe('Posts Store', () => {
     expect(store.stats.scheduled).toBe(3);
   });
 
+  it('duplicatePost posts to /duplicate endpoint', async () => {
+    const clone = { id: 42, caption: 'Cloned', status: 'draft' };
+    vi.mocked(axios.post).mockResolvedValueOnce({ data: clone });
+
+    const store = usePostsStore();
+    const result = await store.duplicatePost(7);
+
+    expect(axios.post).toHaveBeenCalledWith('/api/posts/7/duplicate');
+    expect(result.id).toBe(42);
+    expect(result.status).toBe('draft');
+  });
+
+  it('createPost accepts draft status', async () => {
+    const body = {
+      caption: 'Draft idea',
+      scheduledAt: '2026-04-15T10:00:00',
+      platformAccountIds: [],
+      mediaIds: [],
+      status: 'draft' as const,
+    };
+    vi.mocked(axios.post).mockResolvedValueOnce({ data: { id: 9, ...body } });
+
+    const store = usePostsStore();
+    await store.createPost(body);
+
+    expect(axios.post).toHaveBeenCalledWith('/api/posts', body);
+  });
+
   it('fetchCalendar returns posts for month', async () => {
     const mockPosts = [{ id: 1, caption: 'April post', scheduledAt: '2026-04-15T10:00:00' }];
     vi.mocked(axios.get).mockResolvedValueOnce({ data: mockPosts });

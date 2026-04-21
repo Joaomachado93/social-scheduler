@@ -10,13 +10,13 @@ const postsStore = usePostsStore();
 const toast = useToast();
 const formRef = ref<InstanceType<typeof PostForm>>();
 
-async function handleSubmit(data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[] }) {
+async function handleSubmit(data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[]; status?: 'scheduled' | 'draft' }) {
   if (formRef.value) formRef.value.submitting = true;
 
   try {
     await postsStore.createPost(data);
-    toast.success('Post agendado com sucesso');
-    router.push('/');
+    toast.success(data.status === 'draft' ? 'Rascunho guardado' : 'Post agendado com sucesso');
+    router.push(data.status === 'draft' ? '/posts?filter=draft' : '/');
   } catch (e: any) {
     const msg = e.response?.data?.error || 'Erro ao criar post';
     if (formRef.value) formRef.value.error = msg;
@@ -34,6 +34,7 @@ async function handleSubmit(data: { caption: string; scheduledAt: string; platfo
       ref="formRef"
       submit-label="Agendar Post"
       submitting-label="A criar..."
+      :allow-draft="true"
       @submit="handleSubmit"
     />
   </div>

@@ -15,6 +15,7 @@ const initialData = ref<any>(null);
 const loading = ref(true);
 const loadError = ref('');
 const postId = Number(route.params.id);
+const currentStatus = ref<string>('');
 
 onMounted(async () => {
   try {
@@ -26,6 +27,7 @@ onMounted(async () => {
       return;
     }
 
+    currentStatus.value = post.status;
     initialData.value = {
       caption: post.caption || '',
       scheduledAt: post.scheduledAt,
@@ -39,12 +41,16 @@ onMounted(async () => {
   }
 });
 
-async function handleSubmit(data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[] }) {
+async function handleSubmit(data: { caption: string; scheduledAt: string; platformAccountIds: number[]; mediaIds: number[]; status?: 'scheduled' | 'draft' }) {
   if (formRef.value) formRef.value.submitting = true;
 
   try {
     await postsStore.updatePost(postId, data);
-    toast.success('Post atualizado');
+    const promoted = currentStatus.value === 'draft' && data.status === 'scheduled';
+    toast.success(
+      data.status === 'draft' ? 'Rascunho guardado' :
+      promoted ? 'Rascunho agendado' : 'Post atualizado'
+    );
     router.push(`/posts/${postId}`);
   } catch (e: any) {
     const msg = e.response?.data?.error || 'Erro ao atualizar post';
@@ -75,8 +81,9 @@ async function handleSubmit(data: { caption: string; scheduledAt: string; platfo
       v-else-if="initialData"
       ref="formRef"
       :initial-data="initialData"
-      submit-label="Guardar Alterações"
+      :submit-label="currentStatus === 'draft' ? 'Agendar Post' : 'Guardar Alterações'"
       submitting-label="A guardar..."
+      :allow-draft="currentStatus === 'draft'"
       @submit="handleSubmit"
     />
   </div>

@@ -77,6 +77,16 @@ async function handlePublishNow() {
     toast.error(msg);
   }
 }
+
+async function handleDuplicate() {
+  try {
+    const clone = await postsStore.duplicatePost(postId);
+    toast.success('Post duplicado como rascunho');
+    router.push(`/posts/${clone.id}/edit`);
+  } catch {
+    toast.error('Erro ao duplicar post');
+  }
+}
 </script>
 
 <template>
@@ -116,6 +126,12 @@ async function handlePublishNow() {
               class="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
             >
               Publicar agora
+            </button>
+            <button
+              @click="handleDuplicate"
+              class="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+            >
+              Duplicar
             </button>
             <button
               v-if="isEditable"

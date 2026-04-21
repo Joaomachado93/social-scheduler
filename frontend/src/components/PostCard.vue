@@ -8,6 +8,7 @@ const props = defineProps<{ post: Post }>();
 const emit = defineEmits<{
   delete: [id: number];
   publishNow: [id: number];
+  duplicate: [id: number];
 }>();
 
 const formattedDate = computed(() => {
@@ -52,6 +53,12 @@ const isEditable = computed(() =>
         class="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
       >
         Publicar agora
+      </button>
+      <button
+        @click="emit('duplicate', post.id)"
+        class="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+      >
+        Duplicar
       </button>
       <button
         v-if="isEditable"

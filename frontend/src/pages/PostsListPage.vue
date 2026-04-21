@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { usePostsStore } from '../stores/posts.js';
 import { useToast } from '../composables/useToast.js';
 import PostCard from '../components/PostCard.vue';
 
+const router = useRouter();
 const postsStore = usePostsStore();
 const toast = useToast();
 const filter = ref('all');
@@ -30,6 +32,16 @@ async function handlePublishNow(id: number) {
     toast.success('Post publicado');
   } catch {
     toast.error('Erro ao publicar post');
+  }
+}
+
+async function handleDuplicate(id: number) {
+  try {
+    const clone = await postsStore.duplicatePost(id);
+    toast.success('Post duplicado como rascunho');
+    router.push(`/posts/${clone.id}/edit`);
+  } catch {
+    toast.error('Erro ao duplicar post');
   }
 }
 
@@ -89,6 +101,7 @@ async function applyFilter(value: string) {
         :post="post"
         @delete="handleDelete"
         @publish-now="handlePublishNow"
+        @duplicate="handleDuplicate"
       />
     </div>
   </div>
