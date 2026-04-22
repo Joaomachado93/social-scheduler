@@ -32,7 +32,7 @@ jobs:
 
       - run: pnpm --filter frontend build
         env:
-          VITE_API_URL: https://social-scheduler-backend.onrender.com
+          VITE_API_URL: https://social-scheduler-backend-e3c1.onrender.com
 
       # SPA fallback for GitHub Pages
       - run: cp frontend/dist/index.html frontend/dist/404.html
