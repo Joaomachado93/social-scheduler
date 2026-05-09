@@ -28,6 +28,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       .where(and(
         eq(posts.userId, user.userId),
         eq(posts.status, 'scheduled'),
+        gte(posts.scheduledAt, new Date().toISOString()),
       ))
       .orderBy(posts.scheduledAt)
       .limit(10);
