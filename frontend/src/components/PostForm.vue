@@ -68,6 +68,16 @@ const canSubmit = computed(() =>
   selectedPlatformIds.value.length > 0
 );
 
+const submitBlockedReason = computed(() => {
+  if (!caption.value.trim()) return 'Escreve o texto do post';
+  if (!scheduledDate.value || !scheduledTime.value) return 'Define data e hora';
+  if (platformsStore.accounts.length === 0) {
+    return 'Conecta uma plataforma para agendar — entretanto podes guardar como rascunho';
+  }
+  if (selectedPlatformIds.value.length === 0) return 'Seleciona pelo menos uma plataforma';
+  return '';
+});
+
 async function handleSubmit() {
   doSubmit('scheduled');
 }
@@ -193,23 +203,32 @@ defineExpose({ error, submitting });
     </div>
 
     <!-- Submit -->
-    <div class="flex gap-3">
-      <button
-        v-if="allowDraft"
-        type="button"
-        :disabled="submitting"
-        @click="handleSaveDraft"
-        class="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+    <div class="space-y-2">
+      <p
+        v-if="!canSubmit && submitBlockedReason"
+        class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
       >
-        Guardar como rascunho
-      </button>
-      <button
-        type="submit"
-        :disabled="!canSubmit || submitting"
-        class="flex-1 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-      >
-        {{ submitting ? submittingLabel : submitLabel }}
-      </button>
+        {{ submitBlockedReason }}
+      </p>
+      <div class="flex gap-3">
+        <button
+          v-if="allowDraft"
+          type="button"
+          :disabled="submitting || !caption.trim()"
+          @click="handleSaveDraft"
+          class="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+        >
+          Guardar como rascunho
+        </button>
+        <button
+          type="submit"
+          :disabled="!canSubmit || submitting"
+          :title="!canSubmit ? submitBlockedReason : ''"
+          class="flex-1 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {{ submitting ? submittingLabel : submitLabel }}
+        </button>
+      </div>
     </div>
   </form>
 </template>
