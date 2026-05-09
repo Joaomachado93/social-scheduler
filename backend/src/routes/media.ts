@@ -60,7 +60,7 @@ export async function mediaRoutes(app: FastifyInstance) {
 
   app.get('/api/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
     return record;
@@ -69,7 +69,7 @@ export async function mediaRoutes(app: FastifyInstance) {
   // Redirect to public R2 URL — used by Instagram fetch and frontend preview
   app.get('/api/media/:id/file/:type', async (request, reply) => {
     const { id, type } = request.params as { id: string; type: 'original' | 'watermarked' };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 
@@ -82,14 +82,14 @@ export async function mediaRoutes(app: FastifyInstance) {
 
   app.delete('/api/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 
     try { await deleteFromR2(record.originalKey); } catch {}
     try { if (record.watermarkedKey) await deleteFromR2(record.watermarkedKey); } catch {}
 
-    await db.delete(media).where(eq(media.id, parseInt(id)));
+    await db.delete(media).where(eq(media.id, parseInt(id, 10)));
     return { success: true };
   });
 

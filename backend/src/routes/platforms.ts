@@ -122,12 +122,12 @@ export async function platformRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
 
     const accountRows = await db.select().from(platformAccounts)
-      .where(and(eq(platformAccounts.id, parseInt(id)), eq(platformAccounts.userId, user.userId)))
+      .where(and(eq(platformAccounts.id, parseInt(id, 10)), eq(platformAccounts.userId, user.userId)))
       .limit(1);
 
     if (accountRows.length === 0) return reply.status(404).send({ error: 'Account not found' });
 
-    await db.delete(platformAccounts).where(eq(platformAccounts.id, parseInt(id)));
+    await db.delete(platformAccounts).where(eq(platformAccounts.id, parseInt(id, 10)));
     return { success: true };
   });
 }
