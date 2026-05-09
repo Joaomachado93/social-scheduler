@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { authGuard, JwtPayload } from '../middleware/auth.js';
 import { getMetaAuthUrl, exchangeMetaCode } from '../services/oauth/meta.js';
 import { getGoogleAuthUrl, exchangeGoogleCode } from '../services/oauth/google.js';
+import { ownerSeedConfigured } from '../services/ownerSeed.js';
 import { config } from '../config.js';
 
 type OAuthState = { userId: number };
@@ -21,6 +22,16 @@ function verifyOAuthState(state: string): OAuthState {
 }
 
 export async function platformRoutes(app: FastifyInstance) {
+  // Capability hint for the frontend. When owner mode is on, the UI hides
+  // the "Conectar" buttons and shows the seeded accounts as always-available.
+  app.get('/api/platforms/capabilities', { preHandler: authGuard }, async () => {
+    return {
+      ownerMode: ownerSeedConfigured(),
+      meta: { configured: !!config.meta.appId && !!config.meta.appSecret },
+      google: { configured: !!config.google.clientId && !!config.google.clientSecret },
+    };
+  });
+
   // List connected platforms (auth required)
   app.get('/api/platforms', { preHandler: authGuard }, async (request) => {
     const user = (request as any).user as JwtPayload;
@@ -43,8 +54,14 @@ export async function platformRoutes(app: FastifyInstance) {
     const state = signOAuthState(user.userId);
 
     if (platform === 'facebook' || platform === 'instagram') {
+      if (!config.meta.appId || !config.meta.appSecret) {
+        return reply.status(503).send({ error: 'Meta OAuth not configured on the server' });
+      }
       return { url: getMetaAuthUrl(state) };
     } else if (platform === 'youtube') {
+      if (!config.google.clientId || !config.google.clientSecret) {
+        return reply.status(503).send({ error: 'Google OAuth not configured on the server' });
+      }
       return { url: getGoogleAuthUrl(state) };
     }
 

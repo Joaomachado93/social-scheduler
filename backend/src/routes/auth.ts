@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { users } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { signToken } from '../middleware/auth.js';
+import { seedOwnerPlatformsForUser } from '../services/ownerSeed.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/register', async (request, reply) => {
@@ -21,6 +22,8 @@ export async function authRoutes(app: FastifyInstance) {
     const passwordHash = await bcrypt.hash(password, 10);
     const inserted = await db.insert(users).values({ email, passwordHash }).returning();
     const result = inserted[0];
+
+    await seedOwnerPlatformsForUser(result.id);
 
     const token = signToken({ userId: result.id, email: result.email });
     return { token, user: { id: result.id, email: result.email } };
@@ -43,6 +46,8 @@ export async function authRoutes(app: FastifyInstance) {
     if (!valid) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
+
+    await seedOwnerPlatformsForUser(user.id);
 
     const token = signToken({ userId: user.id, email: user.email });
     return { token, user: { id: user.id, email: user.email } };

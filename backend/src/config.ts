@@ -41,4 +41,28 @@ export const config = {
     publicUrl: (process.env.R2_PUBLIC_URL || '').replace(/\/$/, ''),
     logoKey: process.env.R2_LOGO_KEY || 'watermark/logo.png',
   },
+
+  // Personal long-lived tokens for the app owner. When set, every new user
+  // session is auto-seeded with these accounts in platform_accounts so the
+  // user doesn't have to go through OAuth. Each block is independent — set
+  // only the platforms you want available.
+  owner: {
+    facebook: {
+      pageId: process.env.OWNER_FB_PAGE_ID || '',
+      pageToken: process.env.OWNER_FB_PAGE_TOKEN || '',
+      pageName: process.env.OWNER_FB_PAGE_NAME || '',
+    },
+    instagram: {
+      businessId: process.env.OWNER_IG_BUSINESS_ID || '',
+      // Instagram uses the same Page token as Facebook unless overridden.
+      token: process.env.OWNER_IG_TOKEN || process.env.OWNER_FB_PAGE_TOKEN || '',
+      businessName: process.env.OWNER_IG_BUSINESS_NAME || '',
+    },
+    youtube: {
+      channelId: process.env.OWNER_YT_CHANNEL_ID || '',
+      accessToken: process.env.OWNER_YT_ACCESS_TOKEN || '',
+      refreshToken: process.env.OWNER_YT_REFRESH_TOKEN || '',
+      channelName: process.env.OWNER_YT_CHANNEL_NAME || '',
+    },
+  },
 };
