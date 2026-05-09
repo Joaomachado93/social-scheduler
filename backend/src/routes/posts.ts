@@ -26,7 +26,7 @@ export async function postRoutes(app: FastifyInstance) {
   app.get('/api/posts/:id', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
 
     const postRows = await db.select().from(posts)
       .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
@@ -68,39 +68,41 @@ export async function postRoutes(app: FastifyInstance) {
 
     const status = body.status === 'draft' ? 'draft' : 'scheduled';
 
-    const inserted = await db.insert(posts).values({
-      userId: user.userId,
-      caption: body.caption,
-      scheduledAt: body.scheduledAt,
-      status,
-    }).returning();
-    const post = inserted[0];
+    return await db.transaction(async (tx) => {
+      const inserted = await tx.insert(posts).values({
+        userId: user.userId,
+        caption: body.caption,
+        scheduledAt: body.scheduledAt,
+        status,
+      }).returning();
+      const post = inserted[0];
 
-    if (body.platformAccountIds?.length) {
-      for (const accountId of body.platformAccountIds) {
-        await db.insert(postPlatforms).values({
-          postId: post.id,
-          platformAccountId: accountId,
-        });
+      if (body.platformAccountIds?.length) {
+        for (const accountId of body.platformAccountIds) {
+          await tx.insert(postPlatforms).values({
+            postId: post.id,
+            platformAccountId: accountId,
+          });
+        }
       }
-    }
 
-    if (body.mediaIds?.length) {
-      for (let i = 0; i < body.mediaIds.length; i++) {
-        await db.update(media)
-          .set({ postId: post.id, sortOrder: i })
-          .where(eq(media.id, body.mediaIds[i]));
+      if (body.mediaIds?.length) {
+        for (let i = 0; i < body.mediaIds.length; i++) {
+          await tx.update(media)
+            .set({ postId: post.id, sortOrder: i })
+            .where(eq(media.id, body.mediaIds[i]));
+        }
       }
-    }
 
-    return post;
+      return post;
+    });
   });
 
   // Update post
   app.put('/api/posts/:id', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
     const body = request.body as {
       caption?: string;
       scheduledAt?: string;
@@ -126,36 +128,38 @@ export async function postRoutes(app: FastifyInstance) {
       updates.status = body.status;
     }
 
-    await db.update(posts).set(updates).where(eq(posts.id, postId));
+    return await db.transaction(async (tx) => {
+      await tx.update(posts).set(updates).where(eq(posts.id, postId));
 
-    if (body.platformAccountIds) {
-      await db.delete(postPlatforms).where(eq(postPlatforms.postId, postId));
-      for (const accountId of body.platformAccountIds) {
-        await db.insert(postPlatforms).values({
-          postId,
-          platformAccountId: accountId,
-        });
+      if (body.platformAccountIds) {
+        await tx.delete(postPlatforms).where(eq(postPlatforms.postId, postId));
+        for (const accountId of body.platformAccountIds) {
+          await tx.insert(postPlatforms).values({
+            postId,
+            platformAccountId: accountId,
+          });
+        }
       }
-    }
 
-    if (body.mediaIds) {
-      await db.update(media).set({ postId: null }).where(eq(media.postId, postId));
-      for (let i = 0; i < body.mediaIds.length; i++) {
-        await db.update(media)
-          .set({ postId, sortOrder: i })
-          .where(eq(media.id, body.mediaIds[i]));
+      if (body.mediaIds) {
+        await tx.update(media).set({ postId: null }).where(eq(media.postId, postId));
+        for (let i = 0; i < body.mediaIds.length; i++) {
+          await tx.update(media)
+            .set({ postId, sortOrder: i })
+            .where(eq(media.id, body.mediaIds[i]));
+        }
       }
-    }
 
-    const updatedRows = await db.select().from(posts).where(eq(posts.id, postId)).limit(1);
-    return updatedRows[0];
+      const updatedRows = await tx.select().from(posts).where(eq(posts.id, postId)).limit(1);
+      return updatedRows[0];
+    });
   });
 
   // Delete post
   app.delete('/api/posts/:id', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
 
     const existingRows = await db.select().from(posts)
       .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
@@ -163,9 +167,11 @@ export async function postRoutes(app: FastifyInstance) {
 
     if (existingRows.length === 0) return reply.status(404).send({ error: 'Post not found' });
 
-    await db.delete(postPlatforms).where(eq(postPlatforms.postId, postId));
-    await db.update(media).set({ postId: null }).where(eq(media.postId, postId));
-    await db.delete(posts).where(eq(posts.id, postId));
+    await db.transaction(async (tx) => {
+      await tx.delete(postPlatforms).where(eq(postPlatforms.postId, postId));
+      await tx.update(media).set({ postId: null }).where(eq(media.postId, postId));
+      await tx.delete(posts).where(eq(posts.id, postId));
+    });
 
     return { success: true };
   });
@@ -174,7 +180,7 @@ export async function postRoutes(app: FastifyInstance) {
   app.post('/api/posts/:id/publish-now', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
 
     const postRows = await db.select().from(posts)
       .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
@@ -197,7 +203,7 @@ export async function postRoutes(app: FastifyInstance) {
   app.post('/api/posts/:id/duplicate', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
 
     const sourceRows = await db.select().from(posts)
       .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
@@ -206,33 +212,34 @@ export async function postRoutes(app: FastifyInstance) {
 
     if (!source) return reply.status(404).send({ error: 'Post not found' });
 
-    const newScheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    return await db.transaction(async (tx) => {
+      // Preserve source.scheduledAt — duplicate is a draft, user edits before scheduling
+      const cloneInserted = await tx.insert(posts).values({
+        userId: user.userId,
+        caption: source.caption,
+        scheduledAt: source.scheduledAt,
+        status: 'draft',
+      }).returning();
+      const clone = cloneInserted[0];
 
-    const cloneInserted = await db.insert(posts).values({
-      userId: user.userId,
-      caption: source.caption,
-      scheduledAt: newScheduledAt,
-      status: 'draft',
-    }).returning();
-    const clone = cloneInserted[0];
+      const sourcePlatforms = await tx.select().from(postPlatforms)
+        .where(eq(postPlatforms.postId, postId));
+      for (const pp of sourcePlatforms) {
+        await tx.insert(postPlatforms).values({
+          postId: clone.id,
+          platformAccountId: pp.platformAccountId,
+        });
+      }
 
-    const sourcePlatforms = await db.select().from(postPlatforms)
-      .where(eq(postPlatforms.postId, postId));
-    for (const pp of sourcePlatforms) {
-      await db.insert(postPlatforms).values({
-        postId: clone.id,
-        platformAccountId: pp.platformAccountId,
-      });
-    }
-
-    return clone;
+      return clone;
+    });
   });
 
   // Get publish logs for a post
   app.get('/api/posts/:id/logs', async (request, reply) => {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const postId = parseInt(id);
+    const postId = parseInt(id, 10);
 
     const ownerRows = await db.select().from(posts)
       .where(and(eq(posts.id, postId), eq(posts.userId, user.userId)))
