@@ -2,41 +2,35 @@ import axios from 'axios';
 
 const GRAPH_URL = 'https://graph.facebook.com/v19.0';
 
-// Instagram requires media to be at a public URL.
-// We'll serve it temporarily from our backend.
-function getPublicMediaUrl(mediaId: number, baseUrl: string): string {
-  return `${baseUrl}/api/media/${mediaId}/file/watermarked`;
-}
+export type PublisherMedia = {
+  id: number;
+  mediaType: 'image' | 'video';
+  mimeType: string;
+  publicUrl: string;
+};
 
 export async function publishToInstagram(
   igAccountId: string,
   accessToken: string,
   caption: string,
-  mediaFiles: Array<{ id: number; watermarkedPath: string | null; originalPath: string; mediaType: string }>,
-  baseUrl: string = 'http://localhost:3001',
+  mediaFiles: PublisherMedia[],
 ): Promise<string> {
 
   if (mediaFiles.length === 0) {
     throw new Error('Instagram requires at least one image or video');
   }
 
-  const images = mediaFiles.filter(m => m.mediaType === 'image');
-  const videos = mediaFiles.filter(m => m.mediaType === 'video');
-
   if (mediaFiles.length === 1) {
     const file = mediaFiles[0];
-    const mediaUrl = getPublicMediaUrl(file.id, baseUrl);
 
     if (file.mediaType === 'video') {
-      // Video (Reel)
       const { data: container } = await axios.post(`${GRAPH_URL}/${igAccountId}/media`, {
-        video_url: mediaUrl,
+        video_url: file.publicUrl,
         caption,
         media_type: 'REELS',
         access_token: accessToken,
       });
 
-      // Wait for processing
       await waitForIgProcessing(container.id, accessToken);
 
       const { data: published } = await axios.post(`${GRAPH_URL}/${igAccountId}/media_publish`, {
@@ -46,9 +40,8 @@ export async function publishToInstagram(
       return published.id;
     }
 
-    // Single image
     const { data: container } = await axios.post(`${GRAPH_URL}/${igAccountId}/media`, {
-      image_url: mediaUrl,
+      image_url: file.publicUrl,
       caption,
       access_token: accessToken,
     });
@@ -60,20 +53,19 @@ export async function publishToInstagram(
     return published.id;
   }
 
-  // Carousel (multiple images/videos)
+  // Carousel
   const childIds: string[] = [];
   for (const file of mediaFiles) {
-    const mediaUrl = getPublicMediaUrl(file.id, baseUrl);
     const params: any = {
       is_carousel_item: true,
       access_token: accessToken,
     };
 
     if (file.mediaType === 'video') {
-      params.video_url = mediaUrl;
+      params.video_url = file.publicUrl;
       params.media_type = 'VIDEO';
     } else {
-      params.image_url = mediaUrl;
+      params.image_url = file.publicUrl;
     }
 
     const { data: child } = await axios.post(`${GRAPH_URL}/${igAccountId}/media`, params);
@@ -85,7 +77,6 @@ export async function publishToInstagram(
     childIds.push(child.id);
   }
 
-  // Create carousel container
   const { data: carousel } = await axios.post(`${GRAPH_URL}/${igAccountId}/media`, {
     media_type: 'CAROUSEL',
     caption,

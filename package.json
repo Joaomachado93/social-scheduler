@@ -10,6 +10,6 @@
     "test": "pnpm --filter backend test && pnpm --filter frontend test"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["bcrypt", "better-sqlite3", "esbuild", "sharp"]
+    "onlyBuiltDependencies": ["bcrypt", "esbuild", "sharp"]
   }
 }

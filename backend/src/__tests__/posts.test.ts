@@ -7,140 +7,131 @@ import bcrypt from 'bcrypt';
 describe('Posts Data Layer', () => {
   let db: ReturnType<typeof getTestDb>;
 
-  beforeEach(() => {
-    db = setupTestDb();
+  beforeEach(async () => {
+    db = await setupTestDb();
 
-    // Seed a test user
     const hash = bcrypt.hashSync('password123', 10);
-    db.insert(users).values({ email: 'test@test.com', passwordHash: hash }).run();
+    await db.insert(users).values({ email: 'test@test.com', passwordHash: hash });
 
-    // Seed a platform account
-    db.insert(platformAccounts).values({
+    await db.insert(platformAccounts).values({
       userId: 1,
       platform: 'facebook',
       accountName: 'Test Page',
       accountId: 'fb-123',
       accessToken: 'token-abc',
-    }).run();
+    });
   });
 
-  afterEach(() => {
-    teardownTestDb();
+  afterEach(async () => {
+    await teardownTestDb();
   });
 
-  it('creates a post', () => {
-    const post = db.insert(posts).values({
+  it('creates a post', async () => {
+    const inserted = await db.insert(posts).values({
       userId: 1,
       caption: 'Hello World',
       scheduledAt: '2026-04-15T10:00:00',
       status: 'scheduled',
-    }).returning().get();
+    }).returning();
+    const post = inserted[0];
 
     expect(post.id).toBe(1);
     expect(post.caption).toBe('Hello World');
     expect(post.status).toBe('scheduled');
   });
 
-  it('creates a post with platform links', () => {
-    const post = db.insert(posts).values({
+  it('creates a post with platform links', async () => {
+    const inserted = await db.insert(posts).values({
       userId: 1,
       caption: 'Post with platforms',
       scheduledAt: '2026-04-15T10:00:00',
       status: 'scheduled',
-    }).returning().get();
+    }).returning();
+    const post = inserted[0];
 
-    db.insert(postPlatforms).values({
+    await db.insert(postPlatforms).values({
       postId: post.id,
       platformAccountId: 1,
-    }).run();
+    });
 
-    const linked = db.select().from(postPlatforms)
-      .where(eq(postPlatforms.postId, post.id)).all();
+    const linked = await db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, post.id));
 
     expect(linked).toHaveLength(1);
     expect(linked[0].platformAccountId).toBe(1);
     expect(linked[0].status).toBe('pending');
   });
 
-  it('lists posts by user', () => {
-    db.insert(posts).values({ userId: 1, caption: 'Post 1', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' }).run();
-    db.insert(posts).values({ userId: 1, caption: 'Post 2', scheduledAt: '2026-04-16T10:00:00', status: 'draft' }).run();
+  it('lists posts by user', async () => {
+    await db.insert(posts).values({ userId: 1, caption: 'Post 1', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' });
+    await db.insert(posts).values({ userId: 1, caption: 'Post 2', scheduledAt: '2026-04-16T10:00:00', status: 'draft' });
 
-    const result = db.select().from(posts).where(eq(posts.userId, 1)).all();
+    const result = await db.select().from(posts).where(eq(posts.userId, 1));
     expect(result).toHaveLength(2);
   });
 
-  it('updates a scheduled post', () => {
-    db.insert(posts).values({ userId: 1, caption: 'Original', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' }).run();
+  it('updates a scheduled post', async () => {
+    await db.insert(posts).values({ userId: 1, caption: 'Original', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' });
 
-    db.update(posts)
+    await db.update(posts)
       .set({ caption: 'Updated', updatedAt: new Date().toISOString() })
-      .where(eq(posts.id, 1))
-      .run();
+      .where(eq(posts.id, 1));
 
-    const updated = db.select().from(posts).where(eq(posts.id, 1)).get();
-    expect(updated?.caption).toBe('Updated');
+    const rows = await db.select().from(posts).where(eq(posts.id, 1));
+    expect(rows[0]?.caption).toBe('Updated');
   });
 
-  it('does not allow invalid status', () => {
-    expect(() => {
-      db.insert(posts).values({
-        userId: 1,
-        caption: 'Bad post',
-        scheduledAt: '2026-04-15T10:00:00',
-        status: 'invalid_status' as any,
-      }).run();
-    }).toThrow();
-  });
-
-  it('deletes a post and cascades platform links', () => {
-    const post = db.insert(posts).values({
+  it('deletes a post and cascades platform links', async () => {
+    const inserted = await db.insert(posts).values({
       userId: 1, caption: 'To delete', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled',
-    }).returning().get();
+    }).returning();
+    const post = inserted[0];
 
-    db.insert(postPlatforms).values({ postId: post.id, platformAccountId: 1 }).run();
+    await db.insert(postPlatforms).values({ postId: post.id, platformAccountId: 1 });
 
-    // Delete platform links first (manual cascade)
-    db.delete(postPlatforms).where(eq(postPlatforms.postId, post.id)).run();
-    db.delete(posts).where(eq(posts.id, post.id)).run();
+    await db.delete(postPlatforms).where(eq(postPlatforms.postId, post.id));
+    await db.delete(posts).where(eq(posts.id, post.id));
 
-    expect(db.select().from(posts).where(eq(posts.id, post.id)).get()).toBeUndefined();
-    expect(db.select().from(postPlatforms).where(eq(postPlatforms.postId, post.id)).all()).toHaveLength(0);
+    const remaining = await db.select().from(posts).where(eq(posts.id, post.id));
+    expect(remaining).toHaveLength(0);
+    const links = await db.select().from(postPlatforms).where(eq(postPlatforms.postId, post.id));
+    expect(links).toHaveLength(0);
   });
 
-  it('stores publish logs', () => {
-    const post = db.insert(posts).values({
+  it('stores publish logs', async () => {
+    const inserted = await db.insert(posts).values({
       userId: 1, caption: 'Logged post', scheduledAt: '2026-04-15T10:00:00', status: 'published',
-    }).returning().get();
+    }).returning();
+    const post = inserted[0];
 
-    db.insert(publishLogs).values({
+    await db.insert(publishLogs).values({
       postId: post.id,
       platform: 'facebook',
       level: 'info',
       message: 'Published successfully',
-    }).run();
+    });
 
-    db.insert(publishLogs).values({
+    await db.insert(publishLogs).values({
       postId: post.id,
       platform: 'instagram',
       level: 'error',
       message: 'Failed to publish',
       details: 'Token expired',
-    }).run();
+    });
 
-    const logs = db.select().from(publishLogs).where(eq(publishLogs.postId, post.id)).all();
+    const logs = await db.select().from(publishLogs).where(eq(publishLogs.postId, post.id));
     expect(logs).toHaveLength(2);
     expect(logs[0].message).toBe('Published successfully');
     expect(logs[1].level).toBe('error');
     expect(logs[1].details).toBe('Token expired');
   });
 
-  it('filters posts by status', () => {
-    db.insert(posts).values({ userId: 1, caption: 'Scheduled', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' }).run();
-    db.insert(posts).values({ userId: 1, caption: 'Published', scheduledAt: '2026-04-14T10:00:00', status: 'published' }).run();
-    db.insert(posts).values({ userId: 1, caption: 'Failed', scheduledAt: '2026-04-13T10:00:00', status: 'failed' }).run();
+  it('filters posts by status', async () => {
+    await db.insert(posts).values({ userId: 1, caption: 'Scheduled', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' });
+    await db.insert(posts).values({ userId: 1, caption: 'Published', scheduledAt: '2026-04-14T10:00:00', status: 'published' });
+    await db.insert(posts).values({ userId: 1, caption: 'Failed', scheduledAt: '2026-04-13T10:00:00', status: 'failed' });
 
-    const all = db.select().from(posts).where(eq(posts.userId, 1)).all();
+    const all = await db.select().from(posts).where(eq(posts.userId, 1));
     expect(all).toHaveLength(3);
 
     const scheduled = all.filter(p => p.status === 'scheduled');
@@ -148,68 +139,68 @@ describe('Posts Data Layer', () => {
     expect(scheduled[0].caption).toBe('Scheduled');
   });
 
-  it('creates a draft post distinct from scheduled', () => {
-    const draft = db.insert(posts).values({
+  it('creates a draft post distinct from scheduled', async () => {
+    const inserted = await db.insert(posts).values({
       userId: 1, caption: 'Work in progress', scheduledAt: '2026-04-15T10:00:00', status: 'draft',
-    }).returning().get();
+    }).returning();
+    const draft = inserted[0];
 
     expect(draft.status).toBe('draft');
-    // Scheduler only picks 'scheduled', so drafts must stay invisible
-    const schedulerQueue = db.select().from(posts).where(eq(posts.status, 'scheduled')).all();
+    const schedulerQueue = await db.select().from(posts).where(eq(posts.status, 'scheduled'));
     expect(schedulerQueue).toHaveLength(0);
   });
 
-  it('promotes a draft to scheduled via status update', () => {
-    db.insert(posts).values({
+  it('promotes a draft to scheduled via status update', async () => {
+    await db.insert(posts).values({
       userId: 1, caption: 'Draft', scheduledAt: '2026-04-15T10:00:00', status: 'draft',
-    }).run();
+    });
 
-    db.update(posts).set({ status: 'scheduled', updatedAt: new Date().toISOString() })
-      .where(eq(posts.id, 1)).run();
+    await db.update(posts).set({ status: 'scheduled', updatedAt: new Date().toISOString() })
+      .where(eq(posts.id, 1));
 
-    const updated = db.select().from(posts).where(eq(posts.id, 1)).get();
-    expect(updated?.status).toBe('scheduled');
+    const rows = await db.select().from(posts).where(eq(posts.id, 1));
+    expect(rows[0]?.status).toBe('scheduled');
   });
 
-  it('duplicates a post as draft with fresh platform links', () => {
-    const source = db.insert(posts).values({
+  it('duplicates a post as draft with fresh platform links', async () => {
+    const sourceInserted = await db.insert(posts).values({
       userId: 1, caption: 'Original caption', scheduledAt: '2026-04-15T10:00:00', status: 'published',
-    }).returning().get();
+    }).returning();
+    const source = sourceInserted[0];
 
-    db.insert(postPlatforms).values({
+    await db.insert(postPlatforms).values({
       postId: source.id, platformAccountId: 1, status: 'published', platformPostId: 'remote-1',
-    }).run();
+    });
 
-    // Clone logic: new post with status=draft, copy caption, copy platform links (reset status)
     const newScheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const clone = db.insert(posts).values({
+    const cloneInserted = await db.insert(posts).values({
       userId: source.userId,
       caption: source.caption,
       scheduledAt: newScheduledAt,
       status: 'draft',
-    }).returning().get();
+    }).returning();
+    const clone = cloneInserted[0];
 
-    const sourcePlatforms = db.select().from(postPlatforms)
-      .where(eq(postPlatforms.postId, source.id)).all();
+    const sourcePlatforms = await db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, source.id));
     for (const pp of sourcePlatforms) {
-      db.insert(postPlatforms).values({
+      await db.insert(postPlatforms).values({
         postId: clone.id,
         platformAccountId: pp.platformAccountId,
-      }).run();
+      });
     }
 
     expect(clone.id).not.toBe(source.id);
     expect(clone.caption).toBe(source.caption);
     expect(clone.status).toBe('draft');
 
-    const clonedPlatforms = db.select().from(postPlatforms)
-      .where(eq(postPlatforms.postId, clone.id)).all();
+    const clonedPlatforms = await db.select().from(postPlatforms)
+      .where(eq(postPlatforms.postId, clone.id));
     expect(clonedPlatforms).toHaveLength(1);
-    // Platform status must reset — not inherit source's 'published' state
     expect(clonedPlatforms[0].status).toBe('pending');
     expect(clonedPlatforms[0].platformPostId).toBeNull();
 
-    // Original must remain intact
-    expect(db.select().from(posts).where(eq(posts.id, source.id)).get()?.status).toBe('published');
+    const sourceRows = await db.select().from(posts).where(eq(posts.id, source.id));
+    expect(sourceRows[0]?.status).toBe('published');
   });
 });

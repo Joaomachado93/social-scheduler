@@ -154,7 +154,7 @@ async function handleDuplicate() {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div v-for="file in post.media" :key="file.id" class="aspect-square bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
             <img
-              v-if="file.mediaType === 'image' && file.watermarkedPath"
+              v-if="file.mediaType === 'image' && file.watermarkedKey"
               :src="`/api/media/${file.id}/file/watermarked`"
               class="w-full h-full object-cover"
             />

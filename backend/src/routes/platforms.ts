@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
 import { platformAccounts } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { authGuard, JwtPayload, signToken } from '../middleware/auth.js';
+import { authGuard, JwtPayload } from '../middleware/auth.js';
 import { getMetaAuthUrl, exchangeMetaCode } from '../services/oauth/meta.js';
 import { getGoogleAuthUrl, exchangeGoogleCode } from '../services/oauth/google.js';
 import { config } from '../config.js';
@@ -11,16 +11,15 @@ export async function platformRoutes(app: FastifyInstance) {
   // List connected platforms (auth required)
   app.get('/api/platforms', { preHandler: authGuard }, async (request) => {
     const user = (request as any).user as JwtPayload;
-    return db.select().from(platformAccounts)
-      .where(eq(platformAccounts.userId, user.userId))
-      .all()
-      .map(a => ({
-        id: a.id,
-        platform: a.platform,
-        accountName: a.accountName,
-        accountId: a.accountId,
-        createdAt: a.createdAt,
-      }));
+    const accounts = await db.select().from(platformAccounts)
+      .where(eq(platformAccounts.userId, user.userId));
+    return accounts.map(a => ({
+      id: a.id,
+      platform: a.platform,
+      accountName: a.accountName,
+      accountId: a.accountId,
+      createdAt: a.createdAt,
+    }));
   });
 
   // Get auth URL for a platform
@@ -28,7 +27,6 @@ export async function platformRoutes(app: FastifyInstance) {
     const user = (request as any).user as JwtPayload;
     const { platform } = request.params as { platform: string };
 
-    // Encode user info in state for the callback
     const state = Buffer.from(JSON.stringify({ userId: user.userId })).toString('base64');
 
     if (platform === 'facebook' || platform === 'instagram') {
@@ -40,7 +38,7 @@ export async function platformRoutes(app: FastifyInstance) {
     return reply.status(400).send({ error: 'Unknown platform' });
   });
 
-  // Meta OAuth callback (no auth header - redirect from browser)
+  // Meta OAuth callback
   app.get('/api/platforms/facebook/callback', async (request, reply) => {
     const { code, state } = request.query as { code: string; state: string };
 
@@ -49,22 +47,21 @@ export async function platformRoutes(app: FastifyInstance) {
       const accounts = await exchangeMetaCode(code);
 
       for (const account of accounts) {
-        // Upsert: delete existing, then insert
-        db.delete(platformAccounts)
+        await db.delete(platformAccounts)
           .where(and(
             eq(platformAccounts.userId, userId),
             eq(platformAccounts.platform, account.platform),
             eq(platformAccounts.accountId, account.accountId),
-          )).run();
+          ));
 
-        db.insert(platformAccounts).values({
+        await db.insert(platformAccounts).values({
           userId,
           platform: account.platform,
           accountId: account.accountId,
           accountName: account.accountName,
           accessToken: account.accessToken,
           tokenExpires: account.tokenExpires,
-        }).run();
+        });
       }
 
       return reply.redirect(`${config.appUrl}/platforms?connected=facebook`);
@@ -82,15 +79,14 @@ export async function platformRoutes(app: FastifyInstance) {
       const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
       const account = await exchangeGoogleCode(code);
 
-      // Upsert
-      db.delete(platformAccounts)
+      await db.delete(platformAccounts)
         .where(and(
           eq(platformAccounts.userId, userId),
           eq(platformAccounts.platform, 'youtube'),
           eq(platformAccounts.accountId, account.accountId),
-        )).run();
+        ));
 
-      db.insert(platformAccounts).values({
+      await db.insert(platformAccounts).values({
         userId,
         platform: 'youtube',
         accountId: account.accountId,
@@ -98,7 +94,7 @@ export async function platformRoutes(app: FastifyInstance) {
         accessToken: account.accessToken,
         refreshToken: account.refreshToken,
         tokenExpires: account.tokenExpires,
-      }).run();
+      });
 
       return reply.redirect(`${config.appUrl}/platforms?connected=youtube`);
     } catch (err: any) {
@@ -112,13 +108,13 @@ export async function platformRoutes(app: FastifyInstance) {
     const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
 
-    const account = db.select().from(platformAccounts)
+    const accountRows = await db.select().from(platformAccounts)
       .where(and(eq(platformAccounts.id, parseInt(id)), eq(platformAccounts.userId, user.userId)))
-      .get();
+      .limit(1);
 
-    if (!account) return reply.status(404).send({ error: 'Account not found' });
+    if (accountRows.length === 0) return reply.status(404).send({ error: 'Account not found' });
 
-    db.delete(platformAccounts).where(eq(platformAccounts.id, parseInt(id))).run();
+    await db.delete(platformAccounts).where(eq(platformAccounts.id, parseInt(id)));
     return { success: true };
   });
 }

@@ -12,6 +12,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   appUrl: process.env.APP_URL || 'http://localhost:5173',
   apiUrl: process.env.API_URL || 'http://localhost:3001',
+  databaseUrl: process.env.DATABASE_URL || '',
 
   meta: {
     appId: process.env.META_APP_ID || '',
@@ -32,9 +33,12 @@ export const config = {
     scale: parseFloat(process.env.WATERMARK_SCALE || '0.15'),
   },
 
-  paths: {
-    uploads: resolve(__dirname, '../uploads'),
-    watermark: resolve(__dirname, '../watermark/logo.png'),
-    db: resolve(__dirname, '../data/scheduler.db'),
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+    bucket: process.env.R2_BUCKET || '',
+    publicUrl: (process.env.R2_PUBLIC_URL || '').replace(/\/$/, ''),
+    logoKey: process.env.R2_LOGO_KEY || 'watermark/logo.png',
   },
 };

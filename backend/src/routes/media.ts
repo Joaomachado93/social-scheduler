@@ -1,29 +1,27 @@
 import { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
-import { pipeline } from 'stream/promises';
-import { createWriteStream, createReadStream, mkdirSync, unlinkSync, existsSync, readFileSync } from 'fs';
-import { resolve, extname, dirname } from 'path';
+import { extname } from 'path';
 import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
 import { media } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { config } from '../config.js';
 import { authGuard } from '../middleware/auth.js';
-import { watermarkImage, watermarkVideo } from '../services/watermark.js';
+import { watermarkImageBuffer, watermarkVideoBuffer, clearLogoCache } from '../services/watermark.js';
+import { uploadToR2, deleteFromR2, getPublicUrl } from '../services/storage.js';
+import sharp from 'sharp';
 
 const IMAGE_TYPES = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const VIDEO_TYPES = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
 
 export async function mediaRoutes(app: FastifyInstance) {
-  await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
+  await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } });
 
   app.addHook('onRequest', authGuard);
 
   app.post('/api/media/upload', async (request, reply) => {
     const file = await request.file();
-    if (!file) {
-      return reply.status(400).send({ error: 'No file provided' });
-    }
+    if (!file) return reply.status(400).send({ error: 'No file provided' });
 
     const ext = extname(file.filename).toLowerCase();
     const isImage = IMAGE_TYPES.includes(ext);
@@ -34,28 +32,24 @@ export async function mediaRoutes(app: FastifyInstance) {
     }
 
     const id = randomUUID();
-    const originalDir = resolve(config.paths.uploads, 'original');
-    const watermarkedDir = resolve(config.paths.uploads, 'watermarked');
-    mkdirSync(originalDir, { recursive: true });
-    mkdirSync(watermarkedDir, { recursive: true });
+    const originalKey = `original/${id}${ext}`;
+    const watermarkedKey = `watermarked/${id}${ext}`;
 
-    const originalPath = resolve(originalDir, `${id}${ext}`);
-    const watermarkedPath = resolve(watermarkedDir, `${id}${ext}`);
+    const buffer = await file.toBuffer();
 
-    // Save original file
-    await pipeline(file.file, createWriteStream(originalPath));
+    await uploadToR2(originalKey, buffer, file.mimetype);
 
-    // Insert media record
-    const record = db.insert(media).values({
-      originalPath,
-      watermarkedPath,
+    const inserted = await db.insert(media).values({
+      originalKey,
+      watermarkedKey,
       mediaType: isImage ? 'image' : 'video',
       mimeType: file.mimetype,
+      fileSize: buffer.length,
       processingStatus: 'processing',
-    }).returning().get();
+    }).returning();
+    const record = inserted[0];
 
-    // Process watermark async
-    processWatermark(record.id, originalPath, watermarkedPath, isImage);
+    processWatermark(record.id, buffer, watermarkedKey, file.mimetype, isImage, ext);
 
     return {
       id: record.id,
@@ -66,108 +60,98 @@ export async function mediaRoutes(app: FastifyInstance) {
 
   app.get('/api/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const record = db.select().from(media).where(eq(media.id, parseInt(id))).get();
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
     return record;
   });
 
+  // Redirect to public R2 URL — used by Instagram fetch and frontend preview
   app.get('/api/media/:id/file/:type', async (request, reply) => {
     const { id, type } = request.params as { id: string; type: 'original' | 'watermarked' };
-    const record = db.select().from(media).where(eq(media.id, parseInt(id))).get();
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 
-    const filePath = type === 'watermarked' && record.watermarkedPath
-      ? record.watermarkedPath
-      : record.originalPath;
+    const key = type === 'watermarked' && record.watermarkedKey
+      ? record.watermarkedKey
+      : record.originalKey;
 
-    if (!existsSync(filePath)) {
-      return reply.status(404).send({ error: 'File not found' });
-    }
-
-    return reply.type(record.mimeType).send(createReadStream(filePath));
+    return reply.redirect(getPublicUrl(key));
   });
 
   app.delete('/api/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const record = db.select().from(media).where(eq(media.id, parseInt(id))).get();
+    const rows = await db.select().from(media).where(eq(media.id, parseInt(id))).limit(1);
+    const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 
-    // Delete files
-    try { if (existsSync(record.originalPath)) unlinkSync(record.originalPath); } catch {}
-    try { if (record.watermarkedPath && existsSync(record.watermarkedPath)) unlinkSync(record.watermarkedPath); } catch {}
+    try { await deleteFromR2(record.originalKey); } catch {}
+    try { if (record.watermarkedKey) await deleteFromR2(record.watermarkedKey); } catch {}
 
-    db.delete(media).where(eq(media.id, parseInt(id))).run();
+    await db.delete(media).where(eq(media.id, parseInt(id)));
     return { success: true };
   });
 
-  // GET /api/settings/logo - returns current logo info
-  app.get('/api/settings/logo', async (request, reply) => {
-    const logoPath = config.paths.watermark;
-    if (!existsSync(logoPath)) {
+  app.get('/api/settings/logo', async () => {
+    try {
+      // Fetching public URL is cheap; existence is implied by previous upload + R2 listing not implemented
+      return { hasLogo: true, url: getPublicUrl(config.r2.logoKey) };
+    } catch {
       return { hasLogo: false };
     }
-    return { hasLogo: true };
   });
 
-  // GET /api/settings/logo/file - serve the logo file
-  app.get('/api/settings/logo/file', async (request, reply) => {
-    const logoPath = config.paths.watermark;
-    if (!existsSync(logoPath)) {
+  app.get('/api/settings/logo/file', async (_request, reply) => {
+    try {
+      return reply.redirect(getPublicUrl(config.r2.logoKey));
+    } catch {
       return reply.status(404).send({ error: 'No logo uploaded' });
     }
-    return reply.type('image/png').send(createReadStream(logoPath));
   });
 
-  // POST /api/settings/logo - upload new logo
   app.post('/api/settings/logo', async (request, reply) => {
     const file = await request.file();
-    if (!file) {
-      return reply.status(400).send({ error: 'No file provided' });
-    }
+    if (!file) return reply.status(400).send({ error: 'No file provided' });
 
     const ext = extname(file.filename).toLowerCase();
     if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
       return reply.status(400).send({ error: 'Logo must be an image (PNG, JPG, WEBP)' });
     }
 
-    // Save as logo.png in watermark dir
-    const logoDir = dirname(config.paths.watermark);
-    mkdirSync(logoDir, { recursive: true });
+    const buffer = await file.toBuffer();
+    const png = await sharp(buffer).png().toBuffer();
 
-    // Convert to PNG and save
-    const chunks: Buffer[] = [];
-    for await (const chunk of file.file) {
-      chunks.push(chunk);
-    }
-    const buffer = Buffer.concat(chunks);
-
-    // Use sharp to convert to PNG
-    const sharp = (await import('sharp')).default;
-    await sharp(buffer).png().toFile(config.paths.watermark);
+    await uploadToR2(config.r2.logoKey, png, 'image/png');
+    clearLogoCache();
 
     return { success: true, message: 'Logo updated' };
   });
 
-  // DELETE /api/settings/logo - remove logo
-  app.delete('/api/settings/logo', async (request, reply) => {
-    const logoPath = config.paths.watermark;
-    if (existsSync(logoPath)) {
-      unlinkSync(logoPath);
-    }
+  app.delete('/api/settings/logo', async () => {
+    try { await deleteFromR2(config.r2.logoKey); } catch {}
+    clearLogoCache();
     return { success: true };
   });
 }
 
-async function processWatermark(mediaId: number, originalPath: string, watermarkedPath: string, isImage: boolean) {
+async function processWatermark(
+  mediaId: number,
+  originalBuffer: Buffer,
+  watermarkedKey: string,
+  mimeType: string,
+  isImage: boolean,
+  ext: string,
+) {
   try {
-    if (isImage) {
-      await watermarkImage(originalPath, watermarkedPath);
-    } else {
-      await watermarkVideo(originalPath, watermarkedPath);
-    }
-    db.update(media).set({ processingStatus: 'done' }).where(eq(media.id, mediaId)).run();
+    const watermarked = isImage
+      ? await watermarkImageBuffer(originalBuffer)
+      : await watermarkVideoBuffer(originalBuffer, ext);
+
+    await uploadToR2(watermarkedKey, watermarked, mimeType);
+    await db.update(media).set({ processingStatus: 'done' }).where(eq(media.id, mediaId));
   } catch (err) {
     console.error('Watermark processing failed:', err);
-    db.update(media).set({ processingStatus: 'failed' }).where(eq(media.id, mediaId)).run();
+    await db.update(media).set({ processingStatus: 'failed' }).where(eq(media.id, mediaId));
   }
 }

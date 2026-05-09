@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { createReadStream } from 'fs';
-import FormData from 'form-data';
+import type { PublisherMedia } from './instagram.js';
 
 const GRAPH_URL = 'https://graph.facebook.com/v19.0';
 
@@ -8,11 +7,10 @@ export async function publishToFacebook(
   pageId: string,
   accessToken: string,
   caption: string,
-  mediaFiles: Array<{ watermarkedPath: string | null; originalPath: string; mediaType: string; mimeType: string }>,
+  mediaFiles: PublisherMedia[],
 ): Promise<string> {
 
   if (mediaFiles.length === 0) {
-    // Text-only post
     const { data } = await axios.post(`${GRAPH_URL}/${pageId}/feed`, {
       message: caption,
       access_token: accessToken,
@@ -24,56 +22,35 @@ export async function publishToFacebook(
   const videos = mediaFiles.filter(m => m.mediaType === 'video');
 
   if (videos.length > 0) {
-    // Video post (use first video)
     const video = videos[0];
-    const filePath = video.watermarkedPath || video.originalPath;
-    const form = new FormData();
-    form.append('source', createReadStream(filePath));
-    form.append('description', caption);
-    form.append('access_token', accessToken);
-
-    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/videos`, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
+    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/videos`, {
+      file_url: video.publicUrl,
+      description: caption,
+      access_token: accessToken,
     });
     return data.id;
   }
 
   if (images.length === 1) {
-    // Single image
     const img = images[0];
-    const filePath = img.watermarkedPath || img.originalPath;
-    const form = new FormData();
-    form.append('source', createReadStream(filePath));
-    form.append('message', caption);
-    form.append('access_token', accessToken);
-
-    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/photos`, form, {
-      headers: form.getHeaders(),
+    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/photos`, {
+      url: img.publicUrl,
+      message: caption,
+      access_token: accessToken,
     });
     return data.id;
   }
 
-  // Multiple images - upload unpublished, then create post
+  // Multiple images: upload unpublished, then create combined post
   const photoIds: string[] = [];
   for (const img of images) {
-    const filePath = img.watermarkedPath || img.originalPath;
-    const form = new FormData();
-    form.append('source', createReadStream(filePath));
-    form.append('published', 'false');
-    form.append('access_token', accessToken);
-
-    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/photos`, form, {
-      headers: form.getHeaders(),
+    const { data } = await axios.post(`${GRAPH_URL}/${pageId}/photos`, {
+      url: img.publicUrl,
+      published: false,
+      access_token: accessToken,
     });
     photoIds.push(data.id);
   }
-
-  const attachments: Record<string, { media_fbid: string }> = {};
-  photoIds.forEach((id, i) => {
-    attachments[`attached_media[${i}]`] = { media_fbid: id };
-  });
 
   const postParams: any = {
     message: caption,

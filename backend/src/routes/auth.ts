@@ -13,13 +13,14 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Email and password (min 6 chars) required' });
     }
 
-    const existing = db.select().from(users).where(eq(users.email, email)).get();
-    if (existing) {
+    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (existing.length > 0) {
       return reply.status(409).send({ error: 'Email already registered' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = db.insert(users).values({ email, passwordHash }).returning().get();
+    const inserted = await db.insert(users).values({ email, passwordHash }).returning();
+    const result = inserted[0];
 
     const token = signToken({ userId: result.id, email: result.email });
     return { token, user: { id: result.id, email: result.email } };
@@ -32,7 +33,8 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Email and password required' });
     }
 
-    const user = db.select().from(users).where(eq(users.email, email)).get();
+    const found = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const user = found[0];
     if (!user) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }

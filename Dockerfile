@@ -16,12 +16,9 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Build frontend + backend
+# Build frontend + backend (backend build also copies migrations into dist/)
 RUN pnpm --filter frontend build
 RUN pnpm --filter backend build
-
-# Copy migrations to dist (tsc doesn't copy .sql files)
-RUN cp -r backend/src/db/migrations backend/dist/db/migrations
 
 # Expose port
 EXPOSE 3001
