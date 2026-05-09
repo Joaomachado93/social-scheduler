@@ -182,7 +182,7 @@ export async function postRoutes(app: FastifyInstance) {
     const post = postRows[0];
 
     if (!post) return reply.status(404).send({ error: 'Post not found' });
-    if (!['scheduled', 'failed'].includes(post.status)) {
+    if (!['scheduled', 'failed', 'partial'].includes(post.status)) {
       return reply.status(400).send({ error: 'Post cannot be published in current state' });
     }
 

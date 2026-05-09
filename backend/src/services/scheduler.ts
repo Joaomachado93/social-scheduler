@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { db } from '../db/index.js';
 import { posts, postPlatforms, media, platformAccounts, publishLogs } from '../db/schema.js';
-import { eq, and, lte } from 'drizzle-orm';
+import { eq, and, lte, inArray } from 'drizzle-orm';
 import { publishToFacebook } from './publishers/facebook.js';
 import { publishToInstagram, type PublisherMedia } from './publishers/instagram.js';
 import { publishToYouTube } from './publishers/youtube.js';
@@ -46,8 +46,13 @@ export function startScheduler() {
 }
 
 export async function publishPost(post: { id: number; caption: string | null; scheduledAt: string }) {
+  // Only re-attempt legs that are pending or previously failed.
+  // Skipping 'published' legs prevents duplicate posts on the platform on retry.
   const targets = await db.select().from(postPlatforms)
-    .where(eq(postPlatforms.postId, post.id));
+    .where(and(
+      eq(postPlatforms.postId, post.id),
+      inArray(postPlatforms.status, ['pending', 'failed']),
+    ));
 
   const mediaRows = await db.select().from(media)
     .where(eq(media.postId, post.id));
@@ -78,7 +83,7 @@ export async function publishPost(post: { id: number; caption: string | null; sc
       if (!account) throw new Error('Platform account not found');
 
       await db.update(postPlatforms)
-        .set({ status: 'publishing' })
+        .set({ status: 'publishing', errorMessage: null })
         .where(eq(postPlatforms.id, target.id));
 
       let platformPostId: string;
@@ -129,9 +134,6 @@ export async function publishPost(post: { id: number; caption: string | null; sc
     })
   );
 
-  const allPublished = results.every(r => r.status === 'fulfilled');
-  const allFailed = results.every(r => r.status === 'rejected');
-
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (r.status === 'rejected') {
@@ -149,13 +151,27 @@ export async function publishPost(post: { id: number; caption: string | null; sc
     }
   }
 
+  // Recompute status from ALL legs, including ones we skipped (already-published)
+  const allLegs = await db.select().from(postPlatforms).where(eq(postPlatforms.postId, post.id));
+  const everyPublished = allLegs.every(p => p.status === 'published');
+  const everyFailed = allLegs.every(p => p.status === 'failed');
+  const anyPublished = allLegs.some(p => p.status === 'published');
+
+  const finalStatus = everyPublished
+    ? 'published'
+    : everyFailed
+      ? 'failed'
+      : anyPublished
+        ? 'partial'
+        : 'failed';
+
   await db.update(posts).set({
-    status: allPublished ? 'published' : allFailed ? 'failed' : 'partial',
+    status: finalStatus,
     updatedAt: new Date().toISOString(),
   }).where(eq(posts.id, post.id));
 
   // Free R2 storage as soon as all platforms received the file successfully
-  if (allPublished) {
+  if (everyPublished) {
     try {
       await cleanupMediaForPost(post.id);
     } catch (err) {
