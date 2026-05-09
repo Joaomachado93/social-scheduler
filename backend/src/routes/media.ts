@@ -4,9 +4,9 @@ import { extname } from 'path';
 import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
 import { media } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { config } from '../config.js';
-import { authGuard } from '../middleware/auth.js';
+import { authGuard, JwtPayload } from '../middleware/auth.js';
 import { watermarkImageBuffer, watermarkVideoBuffer, clearLogoCache } from '../services/watermark.js';
 import { uploadToR2, deleteFromR2, getPublicUrl } from '../services/storage.js';
 import sharp from 'sharp';
@@ -20,6 +20,7 @@ export async function mediaRoutes(app: FastifyInstance) {
   app.addHook('onRequest', authGuard);
 
   app.post('/api/media/upload', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
     const file = await request.file();
     if (!file) return reply.status(400).send({ error: 'No file provided' });
 
@@ -40,6 +41,7 @@ export async function mediaRoutes(app: FastifyInstance) {
     await uploadToR2(originalKey, buffer, file.mimetype);
 
     const inserted = await db.insert(media).values({
+      userId: user.userId,
       originalKey,
       watermarkedKey,
       mediaType: isImage ? 'image' : 'video',
@@ -59,17 +61,25 @@ export async function mediaRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/media/:id', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
+    const rows = await db.select().from(media)
+      .where(and(eq(media.id, parseInt(id, 10)), eq(media.userId, user.userId)))
+      .limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
     return record;
   });
 
-  // Redirect to public R2 URL — used by Instagram fetch and frontend preview
+  // Redirect to public R2 URL — used by Instagram fetch and frontend preview.
+  // R2 URLs are technically public, but we still gate on ownership so the
+  // redirect chain doesn't leak the existence of other users' media ids.
   app.get('/api/media/:id/file/:type', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
     const { id, type } = request.params as { id: string; type: 'original' | 'watermarked' };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
+    const rows = await db.select().from(media)
+      .where(and(eq(media.id, parseInt(id, 10)), eq(media.userId, user.userId)))
+      .limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 
@@ -81,8 +91,11 @@ export async function mediaRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/media/:id', async (request, reply) => {
+    const user = (request as any).user as JwtPayload;
     const { id } = request.params as { id: string };
-    const rows = await db.select().from(media).where(eq(media.id, parseInt(id, 10))).limit(1);
+    const rows = await db.select().from(media)
+      .where(and(eq(media.id, parseInt(id, 10)), eq(media.userId, user.userId)))
+      .limit(1);
     const record = rows[0];
     if (!record) return reply.status(404).send({ error: 'Media not found' });
 

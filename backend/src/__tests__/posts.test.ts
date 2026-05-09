@@ -50,6 +50,7 @@ describe('Posts routes', () => {
 
   it('POST /api/posts creates a post (transactional, with platforms + media)', async () => {
     const mediaRow = await db.insert(media).values({
+      userId,
       originalKey: 'original/x.png',
       watermarkedKey: 'watermarked/x.png',
       mediaType: 'image',
@@ -190,7 +191,7 @@ describe('Posts routes', () => {
     }).returning();
     await db.insert(postPlatforms).values({ postId: inserted[0].id, platformAccountId });
     const mediaRow = await db.insert(media).values({
-      postId: inserted[0].id, originalKey: 'k.png', mediaType: 'image', mimeType: 'image/png',
+      userId, postId: inserted[0].id, originalKey: 'k.png', mediaType: 'image', mimeType: 'image/png',
     }).returning();
 
     const res = await app.inject({

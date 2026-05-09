@@ -88,9 +88,12 @@ export async function postRoutes(app: FastifyInstance) {
 
       if (body.mediaIds?.length) {
         for (let i = 0; i < body.mediaIds.length; i++) {
+          // Filter by userId so an attacker can't claim another user's media.
+          // Mismatched ids silently no-op rather than 400 — the post is still
+          // created, just without that media row attached.
           await tx.update(media)
             .set({ postId: post.id, sortOrder: i })
-            .where(eq(media.id, body.mediaIds[i]));
+            .where(and(eq(media.id, body.mediaIds[i]), eq(media.userId, user.userId)));
         }
       }
 
@@ -142,11 +145,15 @@ export async function postRoutes(app: FastifyInstance) {
       }
 
       if (body.mediaIds) {
-        await tx.update(media).set({ postId: null }).where(eq(media.postId, postId));
+        // Detach only this user's media currently on this post (post ownership
+        // is already validated above by `existingRows`).
+        await tx.update(media)
+          .set({ postId: null })
+          .where(and(eq(media.postId, postId), eq(media.userId, user.userId)));
         for (let i = 0; i < body.mediaIds.length; i++) {
           await tx.update(media)
             .set({ postId, sortOrder: i })
-            .where(eq(media.id, body.mediaIds[i]));
+            .where(and(eq(media.id, body.mediaIds[i]), eq(media.userId, user.userId)));
         }
       }
 

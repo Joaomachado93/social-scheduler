@@ -45,6 +45,7 @@ export const postPlatforms = pgTable('post_platforms', {
 
 export const media = pgTable('media', {
   id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
   postId: integer('post_id').references(() => posts.id),
   originalKey: text('original_key').notNull(),
   watermarkedKey: text('watermarked_key'),
