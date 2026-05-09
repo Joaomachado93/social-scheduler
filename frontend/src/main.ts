@@ -10,31 +10,25 @@ if (import.meta.env.VITE_API_URL) {
   axios.defaults.baseURL = import.meta.env.VITE_API_URL;
 }
 
-// DEBUG (temporary, see #7-#10 401 reports). Logs every outgoing request and
-// what Authorization header it sends. Remove once the live 401 issue is solved.
-(window as any).axios = axios;
-console.log('[DEBUG] startup token in localStorage:', localStorage.getItem('token')?.slice(0, 30) + '...');
-console.log('[DEBUG] startup axios.defaults.headers.common:', JSON.stringify(axios.defaults.headers.common));
-axios.interceptors.request.use((cfg) => {
-  const auth = (cfg.headers as any)?.Authorization
-    ?? (cfg.headers as any)?.authorization
-    ?? axios.defaults.headers.common.Authorization;
-  console.log(
-    `[DEBUG] ${cfg.method?.toUpperCase()} ${cfg.url}`,
-    'auth:', typeof auth === 'string' ? auth.slice(0, 25) + '...' : auth,
-    'localStorage.token:', localStorage.getItem('token')?.slice(0, 25) + '...',
-  );
-  return cfg;
-});
+// On 401, the token is stale or rejected (server JWT_SECRET rotated etc).
+// Drop the local session and bounce to /login instead of spamming the
+// console with retries against an invalid token. The login flow itself
+// produces 401 on bad credentials but that path uses the response error
+// directly, so we only react to 401s on requests that carried a token.
 axios.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err?.response?.status === 401) {
-      console.warn(
-        `[DEBUG] 401 on ${err.config?.method?.toUpperCase()} ${err.config?.url}`,
-        'sent auth:', err.config?.headers?.Authorization?.slice?.(0, 25),
-        'response body:', err.response?.data,
-      );
+    if (
+      err?.response?.status === 401 &&
+      err.config?.headers?.Authorization?.toString().startsWith('Bearer ')
+    ) {
+      const hadToken = !!localStorage.getItem('token');
+      localStorage.removeItem('token');
+      delete axios.defaults.headers.common.Authorization;
+      if (hadToken && !location.pathname.endsWith('/login')) {
+        const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+        location.href = `${base}/login?stale=1`;
+      }
     }
     return Promise.reject(err);
   },

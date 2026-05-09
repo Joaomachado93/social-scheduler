@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth.js';
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const email = ref('');
 const password = ref('');
 const isRegister = ref(false);
-const error = ref('');
+const error = ref(route.query.stale === '1' ? 'A tua sessão expirou. Volta a entrar.' : '');
 const loading = ref(false);
 
 async function submit() {
