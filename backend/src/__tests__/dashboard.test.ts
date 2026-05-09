@@ -1,40 +1,58 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { setupTestDb, teardownTestDb, getTestDb } from './setup.js';
+import { setupTestDb, teardownTestDb, getTestDb, getAuthToken } from './setup.js';
 import { posts, users } from '../db/schema.js';
-import { eq, and, gte, lte, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
+import { buildApp } from '../app.js';
+import type { FastifyInstance } from 'fastify';
 
-describe('Dashboard Data Layer', () => {
+describe('Dashboard routes', () => {
+  let app: FastifyInstance;
   let db: ReturnType<typeof getTestDb>;
+  let userId: number;
+  let otherUserId: number;
+  let token: string;
+
+  // Pick a future date for scheduled posts so /upcoming returns them
+  // (the route now filters out scheduledAt < now, see #1).
+  const futureScheduled = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+  const farFutureScheduled = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+  const pastScheduled = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
 
   beforeEach(async () => {
     db = await setupTestDb();
 
     const hash = bcrypt.hashSync('password123', 10);
-    await db.insert(users).values({ email: 'test@test.com', passwordHash: hash });
+    const u1 = await db.insert(users).values({ email: 'a@t.com', passwordHash: hash }).returning();
+    userId = u1[0].id;
+    const u2 = await db.insert(users).values({ email: 'b@t.com', passwordHash: hash }).returning();
+    otherUserId = u2[0].id;
 
-    await db.insert(posts).values({ userId: 1, caption: 'Scheduled 1', scheduledAt: '2026-04-15T10:00:00', status: 'scheduled' });
-    await db.insert(posts).values({ userId: 1, caption: 'Scheduled 2', scheduledAt: '2026-04-16T14:00:00', status: 'scheduled' });
-    await db.insert(posts).values({ userId: 1, caption: 'Published', scheduledAt: '2026-04-10T10:00:00', status: 'published' });
-    await db.insert(posts).values({ userId: 1, caption: 'Failed', scheduledAt: '2026-04-11T10:00:00', status: 'failed' });
-    await db.insert(posts).values({ userId: 1, caption: 'Draft', scheduledAt: '2026-04-20T10:00:00', status: 'draft' });
+    token = getAuthToken(userId, 'a@t.com');
+
+    await db.insert(posts).values({ userId, caption: 'Future S1', scheduledAt: futureScheduled, status: 'scheduled' });
+    await db.insert(posts).values({ userId, caption: 'Future S2', scheduledAt: farFutureScheduled, status: 'scheduled' });
+    await db.insert(posts).values({ userId, caption: 'Past P', scheduledAt: pastScheduled, status: 'published' });
+    await db.insert(posts).values({ userId, caption: 'Past F', scheduledAt: pastScheduled, status: 'failed' });
+    await db.insert(posts).values({ userId, caption: 'Draft', scheduledAt: futureScheduled, status: 'draft' });
+    // belongs to other user — should never appear in this user's results
+    await db.insert(posts).values({ userId: otherUserId, caption: 'Hers', scheduledAt: futureScheduled, status: 'scheduled' });
+
+    app = await buildApp();
   });
 
   afterEach(async () => {
+    await app.close();
     await teardownTestDb();
   });
 
-  it('computes correct stats', async () => {
-    const all = await db.select().from(posts).where(eq(posts.userId, 1));
+  function authHeaders() {
+    return { authorization: `Bearer ${token}` };
+  }
 
-    const stats = {
-      total: all.length,
-      scheduled: all.filter(p => p.status === 'scheduled').length,
-      published: all.filter(p => p.status === 'published').length,
-      failed: all.filter(p => p.status === 'failed').length,
-      draft: all.filter(p => p.status === 'draft').length,
-    };
-
+  it('GET /api/dashboard/stats counts the user own posts only', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/dashboard/stats', headers: authHeaders() });
+    expect(res.statusCode).toBe(200);
+    const stats = res.json();
     expect(stats.total).toBe(5);
     expect(stats.scheduled).toBe(2);
     expect(stats.published).toBe(1);
@@ -42,53 +60,52 @@ describe('Dashboard Data Layer', () => {
     expect(stats.draft).toBe(1);
   });
 
-  it('returns upcoming scheduled posts sorted by date', async () => {
-    const upcoming = await db.select().from(posts)
-      .where(and(eq(posts.userId, 1), eq(posts.status, 'scheduled')))
-      .orderBy(posts.scheduledAt);
-
+  it('GET /api/dashboard/upcoming excludes past-dated posts and other-user posts', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/dashboard/upcoming', headers: authHeaders() });
+    expect(res.statusCode).toBe(200);
+    const upcoming = res.json();
     expect(upcoming).toHaveLength(2);
-    expect(upcoming[0].caption).toBe('Scheduled 1');
-    expect(upcoming[1].caption).toBe('Scheduled 2');
+    expect(upcoming.map((p: any) => p.caption)).toEqual(['Future S1', 'Future S2']);
   });
 
-  it('returns recent posts sorted by updatedAt desc', async () => {
-    const recent = await db.select().from(posts)
-      .where(eq(posts.userId, 1))
-      .orderBy(desc(posts.updatedAt))
-      .limit(3);
-
-    expect(recent).toHaveLength(3);
+  it('GET /api/dashboard/recent returns the user own posts ordered by updatedAt desc', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/dashboard/recent', headers: authHeaders() });
+    expect(res.statusCode).toBe(200);
+    const recent = res.json();
+    expect(recent.length).toBeGreaterThanOrEqual(5);
+    expect(recent.every((p: any) => p.userId === userId)).toBe(true);
   });
 
-  it('filters calendar by month range', async () => {
-    const from = '2026-04-01';
-    const to = '2026-04-30T23:59:59';
-
-    const calendarPosts = await db.select().from(posts)
-      .where(and(
-        eq(posts.userId, 1),
-        gte(posts.scheduledAt, from),
-        lte(posts.scheduledAt, to),
-      ))
-      .orderBy(posts.scheduledAt);
-
-    expect(calendarPosts).toHaveLength(5);
+  it('GET /api/calendar?month=&year= filters by the requested month', async () => {
+    const target = new Date(futureScheduled);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/calendar?year=${target.getUTCFullYear()}&month=${target.getUTCMonth() + 1}`,
+      headers: authHeaders(),
+    });
+    expect(res.statusCode).toBe(200);
+    const list = res.json();
+    expect(list.every((p: any) => p.userId === userId)).toBe(true);
+    // every entry falls in the requested month
+    expect(list.every((p: any) => {
+      const d = new Date(p.scheduledAt);
+      return d.getUTCFullYear() === target.getUTCFullYear() && d.getUTCMonth() === target.getUTCMonth();
+    })).toBe(true);
   });
 
-  it('excludes posts from other months', async () => {
-    await db.insert(posts).values({ userId: 1, caption: 'May post', scheduledAt: '2026-05-01T10:00:00', status: 'scheduled' });
+  it('GET /api/calendar with bogus query falls back to current month without crashing', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/calendar?year=foo&month=bar',
+      headers: authHeaders(),
+    });
+    expect(res.statusCode).toBe(200);
+  });
 
-    const from = '2026-04-01';
-    const to = '2026-04-30T23:59:59';
-
-    const calendarPosts = await db.select().from(posts)
-      .where(and(
-        eq(posts.userId, 1),
-        gte(posts.scheduledAt, from),
-        lte(posts.scheduledAt, to),
-      ));
-
-    expect(calendarPosts).toHaveLength(5);
+  it('GET /api/dashboard/* without auth returns 401', async () => {
+    for (const url of ['/api/dashboard/stats', '/api/dashboard/upcoming', '/api/dashboard/recent', '/api/calendar']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode, url).toBe(401);
+    }
   });
 });

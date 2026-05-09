@@ -5,6 +5,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as schema from '../db/schema.js';
 import { signToken } from '../middleware/auth.js';
+import { setDb } from '../db/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_FOLDER = resolve(__dirname, '../db/migrations');
@@ -20,6 +21,8 @@ export async function setupTestDb() {
   pglite = new PGlite();
   testDb = drizzle(pglite, { schema });
   await migrate(testDb, { migrationsFolder: MIGRATIONS_FOLDER });
+  // Make routes that import the production `db` see the pglite-backed test db.
+  setDb(testDb);
   return testDb;
 }
 
