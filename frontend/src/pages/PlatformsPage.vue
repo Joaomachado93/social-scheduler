@@ -9,8 +9,13 @@ const route = useRoute();
 const toast = ref('');
 const connecting = ref('');
 const ownerMode = ref(false);
-const metaConfigured = ref(false);
-const googleConfigured = ref(false);
+// Default to true: if /capabilities fails (older backend, transient error,
+// CORS hiccup) we still show the Connect button. The auth-url request
+// returns 503 with a clear error if creds are missing on the server, and
+// that error becomes a visible toast. Showing "OAuth não configurado" when
+// we don't actually know is worse than showing a button that may toast.
+const metaConfigured = ref(true);
+const googleConfigured = ref(true);
 const apiOrigin = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') || 'http://localhost:3001';
 
 onMounted(async () => {
@@ -21,8 +26,10 @@ onMounted(async () => {
     ownerMode.value = !!data.ownerMode;
     metaConfigured.value = !!data.meta?.configured;
     googleConfigured.value = !!data.google?.configured;
-  } catch {
-    // older backends won't have this endpoint — fall back to OAuth-only flow
+  } catch (err) {
+    // Older backends won't have /capabilities; on any failure, leave the
+    // optimistic defaults (Connect buttons visible). Logged for debugging.
+    console.warn('[platforms] /capabilities failed, falling back to optimistic defaults:', err);
   }
 
   // Check for callback params
