@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePostsStore } from '../stores/posts.js';
 import { useToast } from '../composables/useToast.js';
@@ -17,6 +17,11 @@ const loading = ref(true);
 const error = ref('');
 const postId = Number(route.params.id);
 
+if (!Number.isInteger(postId) || postId <= 0) {
+  error.value = 'ID de post inválido';
+  loading.value = false;
+}
+
 const platformIcon: Record<string, string> = {
   facebook: 'f',
   instagram: 'ig',
@@ -29,17 +34,68 @@ const platformColor: Record<string, string> = {
   youtube: 'bg-red-600',
 };
 
+async function loadLogs() {
+  const { data } = await axios.get(`/api/posts/${postId}/logs`);
+  publishLogs.value = data;
+}
+
+// Poll the post while any media is still being watermarked.
+// Stops when all media reach 'done' or 'failed', or after MAX_POLL_MS.
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_MS = 60_000;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollStartedAt = 0;
+
+function isMediaProcessing(): boolean {
+  if (!post.value?.media?.length) return false;
+  return post.value.media.some((m: any) =>
+    m.processingStatus !== 'done' && m.processingStatus !== 'failed'
+  );
+}
+
+function startPollingIfNeeded() {
+  if (pollTimer || !isMediaProcessing()) return;
+  pollStartedAt = Date.now();
+  pollTimer = setInterval(async () => {
+    if (Date.now() - pollStartedAt > MAX_POLL_MS) {
+      stopPolling();
+      return;
+    }
+    try {
+      post.value = await postsStore.fetchPost(postId);
+      if (!isMediaProcessing()) stopPolling();
+    } catch {
+      stopPolling();
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+onUnmounted(stopPolling);
+
 onMounted(async () => {
+  if (error.value) return;
   try {
     post.value = await postsStore.fetchPost(postId);
-    const { data } = await axios.get(`/api/posts/${postId}/logs`);
-    publishLogs.value = data;
+    await loadLogs();
+    startPollingIfNeeded();
   } catch (e: any) {
     error.value = e.response?.data?.error || 'Erro ao carregar post';
   } finally {
     loading.value = false;
   }
 });
+
+function mediaSrc(file: any): string {
+  const type = file.processingStatus === 'done' ? 'watermarked' : 'original';
+  return `/api/media/${file.id}/file/${type}`;
+}
 
 const formattedDate = computed(() => {
   if (!post.value) return '';
@@ -69,8 +125,7 @@ async function handlePublishNow() {
     await postsStore.publishNow(postId);
     toast.success('Post publicado');
     post.value = await postsStore.fetchPost(postId);
-    const { data } = await axios.get(`/api/posts/${postId}/logs`);
-    publishLogs.value = data;
+    await loadLogs();
   } catch (e: any) {
     const msg = e.response?.data?.error || 'Erro ao publicar';
     error.value = msg;
@@ -152,15 +207,34 @@ async function handleDuplicate() {
       <div v-if="post.media?.length" class="bg-white rounded-xl shadow p-6 mb-6">
         <h3 class="text-lg font-semibold mb-4">Media</h3>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div v-for="file in post.media" :key="file.id" class="aspect-square bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+          <div
+            v-for="file in post.media"
+            :key="file.id"
+            class="relative aspect-square bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center"
+          >
             <img
-              v-if="file.mediaType === 'image' && file.watermarkedKey"
-              :src="`/api/media/${file.id}/file/watermarked`"
+              v-if="file.mediaType === 'image'"
+              :src="mediaSrc(file)"
               class="w-full h-full object-cover"
             />
-            <div v-else class="text-center text-gray-400">
-              <span class="text-3xl">{{ file.mediaType === 'video' ? '🎬' : '🖼️' }}</span>
-              <p class="text-xs mt-1">{{ file.mediaType }}</p>
+            <video
+              v-else-if="file.mediaType === 'video'"
+              :src="mediaSrc(file)"
+              class="w-full h-full object-cover"
+              controls
+              preload="metadata"
+            />
+            <div
+              v-if="file.processingStatus !== 'done' && file.processingStatus !== 'failed'"
+              class="absolute inset-x-0 bottom-0 bg-black/60 text-white text-xs py-1 text-center"
+            >
+              A processar marca de água…
+            </div>
+            <div
+              v-else-if="file.processingStatus === 'failed'"
+              class="absolute inset-x-0 bottom-0 bg-red-600/80 text-white text-xs py-1 text-center"
+            >
+              Marca de água falhou — usando original
             </div>
           </div>
         </div>
