@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import jwt from 'jsonwebtoken';
 import { db } from '../db/index.js';
 import { platformAccounts } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -6,6 +7,18 @@ import { authGuard, JwtPayload } from '../middleware/auth.js';
 import { getMetaAuthUrl, exchangeMetaCode } from '../services/oauth/meta.js';
 import { getGoogleAuthUrl, exchangeGoogleCode } from '../services/oauth/google.js';
 import { config } from '../config.js';
+
+type OAuthState = { userId: number };
+
+function signOAuthState(userId: number): string {
+  return jwt.sign({ userId }, config.jwtSecret, { expiresIn: '15m' });
+}
+
+function verifyOAuthState(state: string): OAuthState {
+  const payload = jwt.verify(state, config.jwtSecret) as { userId: number };
+  if (typeof payload.userId !== 'number') throw new Error('Invalid OAuth state payload');
+  return { userId: payload.userId };
+}
 
 export async function platformRoutes(app: FastifyInstance) {
   // List connected platforms (auth required)
@@ -27,7 +40,7 @@ export async function platformRoutes(app: FastifyInstance) {
     const user = (request as any).user as JwtPayload;
     const { platform } = request.params as { platform: string };
 
-    const state = Buffer.from(JSON.stringify({ userId: user.userId })).toString('base64');
+    const state = signOAuthState(user.userId);
 
     if (platform === 'facebook' || platform === 'instagram') {
       return { url: getMetaAuthUrl(state) };
@@ -43,7 +56,7 @@ export async function platformRoutes(app: FastifyInstance) {
     const { code, state } = request.query as { code: string; state: string };
 
     try {
-      const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
+      const { userId } = verifyOAuthState(state);
       const accounts = await exchangeMetaCode(code);
 
       for (const account of accounts) {
@@ -76,7 +89,7 @@ export async function platformRoutes(app: FastifyInstance) {
     const { code, state } = request.query as { code: string; state: string };
 
     try {
-      const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
+      const { userId } = verifyOAuthState(state);
       const account = await exchangeGoogleCode(code);
 
       await db.delete(platformAccounts)
