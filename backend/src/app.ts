@@ -11,10 +11,29 @@ export interface BuildAppOptions {
   logger?: boolean;
 }
 
+// APP_URL may be a single origin or a comma-separated allow-list (e.g.
+// "http://localhost:5173,https://joaomachado93.github.io"). Passing the
+// raw string to `@fastify/cors` echoes it verbatim into the
+// Access-Control-Allow-Origin header, which the browser rejects when
+// commas are present. Parse to an array and use a function origin so
+// each request gets a single matched origin echoed back.
+function parseAllowedOrigins(appUrl: string): string[] {
+  return appUrl.split(',').map(o => o.trim()).filter(Boolean);
+}
+
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false });
 
-  await app.register(cors, { origin: config.appUrl, credentials: true });
+  const allowedOrigins = parseAllowedOrigins(config.appUrl);
+  await app.register(cors, {
+    origin: (origin, cb) => {
+      // Same-origin / non-browser callers (curl, server-to-server) have no Origin header
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`Origin ${origin} not allowed by CORS`), false);
+    },
+    credentials: true,
+  });
 
   await app.register(authRoutes);
   await app.register(mediaRoutes);
