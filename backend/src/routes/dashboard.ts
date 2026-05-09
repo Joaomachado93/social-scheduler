@@ -46,12 +46,21 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const user = (request as any).user as JwtPayload;
     const query = request.query as { month?: string; year?: string };
     const now = new Date();
-    const year = parseInt(query.year || String(now.getFullYear()));
-    const month = parseInt(query.month || String(now.getMonth() + 1));
 
-    const from = `${year}-${String(month).padStart(2, '0')}-01`;
-    const toDate = new Date(year, month, 0);
-    const to = `${year}-${String(month).padStart(2, '0')}-${String(toDate.getDate()).padStart(2, '0')}T23:59:59`;
+    const yearRaw = parseInt(query.year ?? String(now.getFullYear()), 10);
+    const monthRaw = parseInt(query.month ?? String(now.getMonth() + 1), 10);
+    const year = Number.isInteger(yearRaw) ? yearRaw : now.getFullYear();
+    const month = Number.isInteger(monthRaw) && monthRaw >= 1 && monthRaw <= 12
+      ? monthRaw
+      : now.getMonth() + 1;
+
+    // Schema stores scheduledAt as `timestamp({ mode: 'string', withTimezone: false })`,
+    // so values come back as ISO strings without trailing 'Z'. Build the bounds in
+    // the same shape with full HH:MM:SS — both endpoints inclusive.
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const lastDay = new Date(year, month, 0).getDate();
+    const from = `${year}-${pad(month)}-01T00:00:00`;
+    const to = `${year}-${pad(month)}-${pad(lastDay)}T23:59:59`;
 
     return await db.select().from(posts)
       .where(and(
