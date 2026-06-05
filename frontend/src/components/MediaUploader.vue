@@ -9,8 +9,15 @@ interface MediaFile {
   originalUrl?: string;
 }
 
-const props = defineProps<{ modelValue: MediaFile[] }>();
-const emit = defineEmits<{ 'update:modelValue': [files: MediaFile[]] }>();
+const props = defineProps<{
+  modelValue: MediaFile[];
+  accept?: string;
+  validate?: (file: File) => string[] | { ok: boolean; errors: string[] };
+}>();
+const emit = defineEmits<{
+  'update:modelValue': [files: MediaFile[]];
+  'update:errors': [errors: string[]];
+}>();
 
 const uploading = ref(false);
 const dragOver = ref(false);
@@ -20,6 +27,17 @@ async function handleFiles(files: FileList | null) {
   uploading.value = true;
 
   for (const file of Array.from(files)) {
+    if (props.validate) {
+      const result = props.validate(file);
+      const errors = Array.isArray(result) ? result : result.errors;
+      if (errors.length > 0) {
+        emit('update:errors', errors);
+        continue;
+      } else {
+        emit('update:errors', []);
+      }
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -69,7 +87,7 @@ function removeFile(index: number) {
         ref="fileInput"
         type="file"
         multiple
-        accept="image/*,video/*"
+        :accept="accept ?? 'image/*,video/*'"
         class="hidden"
         @change="onFileInput"
       />

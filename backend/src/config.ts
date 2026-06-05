@@ -26,11 +26,27 @@ export const config = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/platforms/youtube/callback',
   },
 
+  tiktok: {
+    clientKey: process.env.TIKTOK_CLIENT_KEY || '',
+    clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
+    redirectUri: process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3001/api/video/tiktok/callback',
+  },
+
   watermark: {
     position: process.env.WATERMARK_POSITION || 'southeast',
     opacity: parseFloat(process.env.WATERMARK_OPACITY || '0.7'),
     margin: parseInt(process.env.WATERMARK_MARGIN || '20', 10),
     scale: parseFloat(process.env.WATERMARK_SCALE || '0.15'),
+  },
+
+  // Background job that pulls the user's IG videos and schedules them to
+  // publish on YouTube Shorts + TikTok. No UI — runs on a cron.
+  instagramAutoSync: {
+    enabled: (process.env.IG_AUTOSYNC_ENABLED || 'false').toLowerCase() === 'true',
+    cron: process.env.IG_AUTOSYNC_CRON || '0 */6 * * *',
+    lookbackHours: parseInt(process.env.IG_AUTOSYNC_LOOKBACK_HOURS || '48', 10),
+    spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '24', 10),
+    minDelayMinutes: parseInt(process.env.IG_AUTOSYNC_MIN_DELAY_MINUTES || '60', 10),
   },
 
   r2: {
@@ -63,6 +79,12 @@ export const config = {
       accessToken: process.env.OWNER_YT_ACCESS_TOKEN || '',
       refreshToken: process.env.OWNER_YT_REFRESH_TOKEN || '',
       channelName: process.env.OWNER_YT_CHANNEL_NAME || '',
+    },
+    tiktok: {
+      openId: process.env.OWNER_TIKTOK_OPEN_ID || '',
+      accessToken: process.env.OWNER_TIKTOK_ACCESS_TOKEN || '',
+      refreshToken: process.env.OWNER_TIKTOK_REFRESH_TOKEN || '',
+      displayName: process.env.OWNER_TIKTOK_DISPLAY_NAME || '',
     },
   },
 };

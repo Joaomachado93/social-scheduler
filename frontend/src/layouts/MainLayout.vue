@@ -18,13 +18,20 @@ function closeSidebar() {
   sidebarOpen.value = false;
 }
 
-const navItems = [
+const mainNavItems = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/posts', label: 'Posts', icon: '📝' },
   { to: '/calendar', label: 'Calendário', icon: '📅' },
   { to: '/posts/create', label: 'Novo Post', icon: '➕' },
   { to: '/platforms', label: 'Plataformas', icon: '🔗' },
   { to: '/settings', label: 'Definições', icon: '⚙️' },
+];
+
+const videoNavItems = [
+  { to: '/video', label: 'Video Scheduler', icon: '🎬' },
+  { to: '/video/posts', label: 'Video Posts', icon: '📼' },
+  { to: '/video/create', label: 'Novo Vídeo', icon: '🎥' },
+  { to: '/video/platforms', label: 'YouTube + TikTok', icon: '🔌' },
 ];
 </script>
 
@@ -50,7 +57,7 @@ const navItems = [
 
       <nav class="flex-1 p-4 space-y-1">
         <RouterLink
-          v-for="item in navItems"
+          v-for="item in mainNavItems"
           :key="item.to"
           :to="item.to"
           class="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors"
@@ -62,6 +69,23 @@ const navItems = [
           <span>{{ item.icon }}</span>
           <span>{{ item.label }}</span>
         </RouterLink>
+
+        <div class="pt-4 mt-4 border-t border-gray-700">
+          <p class="px-4 pb-2 text-xs uppercase tracking-wider text-gray-500">Video</p>
+          <RouterLink
+            v-for="item in videoNavItems"
+            :key="item.to"
+            :to="item.to"
+            class="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors"
+            :class="route.path === item.to
+              ? 'bg-blue-600 text-white'
+              : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+            @click="closeSidebar"
+          >
+            <span>{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </div>
       </nav>
 
       <div class="p-4 border-t border-gray-700">

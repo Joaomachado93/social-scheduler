@@ -52,6 +52,26 @@ const router = createRouter({
           component: () => import('../pages/PlatformsPage.vue'),
         },
         {
+          path: 'video',
+          name: 'video-dashboard',
+          component: () => import('../pages/video/VideoDashboardPage.vue'),
+        },
+        {
+          path: 'video/platforms',
+          name: 'video-platforms',
+          component: () => import('../pages/video/VideoPlatformsPage.vue'),
+        },
+        {
+          path: 'video/create',
+          name: 'video-create',
+          component: () => import('../pages/video/VideoCreatePostPage.vue'),
+        },
+        {
+          path: 'video/posts',
+          name: 'video-posts',
+          component: () => import('../pages/video/VideoPostsListPage.vue'),
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('../pages/SettingsPage.vue'),
