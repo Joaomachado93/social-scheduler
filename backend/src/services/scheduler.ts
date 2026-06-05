@@ -48,14 +48,20 @@ export function startScheduler() {
   // Instagram → YouTube Shorts + TikTok auto-sync.
   // Off by default; enable via IG_AUTOSYNC_ENABLED=true.
   if (config.instagramAutoSync.enabled) {
-    cron.schedule(config.instagramAutoSync.cron, async () => {
-      try {
-        await runInstagramAutoSync();
-      } catch (err) {
-        console.error('[ig-auto-sync] crashed:', err);
-      }
-    });
-    console.log(`Instagram auto-sync enabled (cron: ${config.instagramAutoSync.cron})`);
+    cron.schedule(
+      config.instagramAutoSync.cron,
+      async () => {
+        try {
+          await runInstagramAutoSync();
+        } catch (err) {
+          console.error('[ig-auto-sync] crashed:', err);
+        }
+      },
+      { timezone: config.instagramAutoSync.timezone },
+    );
+    console.log(
+      `Instagram auto-sync enabled (cron: ${config.instagramAutoSync.cron} ${config.instagramAutoSync.timezone}, window ${config.instagramAutoSync.windowStartHour}h-${config.instagramAutoSync.windowEndHour}h, spacing ${config.instagramAutoSync.spacingHours}h)`,
+    );
   }
 
   console.log('Scheduler started - checking every minute');
