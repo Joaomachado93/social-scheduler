@@ -39,10 +39,12 @@ export const config = {
     scale: parseFloat(process.env.WATERMARK_SCALE || '0.15'),
   },
 
-  // Background job that pulls the user's IG videos and schedules them to
-  // publish on YouTube Shorts + TikTok. No UI — runs on a cron.
+  // Background job that scrapes a public Instagram profile and schedules
+  // each new video for publication on YouTube Shorts + TikTok. No UI —
+  // runs on a cron. Single-tenant: one IG_USERNAME per deployment.
   instagramAutoSync: {
     enabled: (process.env.IG_AUTOSYNC_ENABLED || 'false').toLowerCase() === 'true',
+    username: process.env.IG_USERNAME || '',
     cron: process.env.IG_AUTOSYNC_CRON || '0 */6 * * *',
     lookbackHours: parseInt(process.env.IG_AUTOSYNC_LOOKBACK_HOURS || '48', 10),
     spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '24', 10),

@@ -10,58 +10,92 @@ vi.mock('../services/storage.js', () => ({
 }));
 
 import axios from 'axios';
-import { listRecentVideos, downloadAndStoreInR2 } from '../services/importers/instagram.js';
+import { listRecentVideosByUsername, downloadAndStoreInR2 } from '../services/importers/instagram.js';
 import { uploadToR2 } from '../services/storage.js';
 
-describe('Instagram importer', () => {
+function makeEdge(opts: {
+  id?: string;
+  shortcode?: string;
+  is_video: boolean;
+  video_url?: string;
+  display_url?: string;
+  caption?: string;
+  taken_at_timestamp: number; // seconds
+}) {
+  const captionEdges = opts.caption ? [{ node: { text: opts.caption } }] : [];
+  return {
+    node: {
+      id: opts.id,
+      shortcode: opts.shortcode,
+      is_video: opts.is_video,
+      video_url: opts.video_url,
+      display_url: opts.display_url,
+      taken_at_timestamp: opts.taken_at_timestamp,
+      edge_media_to_caption: { edges: captionEdges },
+    },
+  };
+}
+
+describe('Instagram importer (public profile scrape)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  describe('listRecentVideos', () => {
-    it('returns only VIDEO and REELS posted since the cutoff', async () => {
+  describe('listRecentVideosByUsername', () => {
+    it('returns only videos posted since the cutoff, with proper headers', async () => {
       const now = Date.now();
-      const recent = new Date(now - 60 * 60_000).toISOString();      // 1h ago
-      const old = new Date(now - 72 * 3_600_000).toISOString();      // 72h ago
-      const sinceIso = new Date(now - 48 * 3_600_000).toISOString(); // 48h ago
+      const recentSec = Math.floor((now - 60 * 60_000) / 1000);   // 1h ago
+      const oldSec = Math.floor((now - 72 * 3_600_000) / 1000);   // 72h ago
+      const sinceIso = new Date(now - 48 * 3_600_000).toISOString();
 
       vi.mocked(axios.get).mockResolvedValueOnce({
         data: {
-          data: [
-            { id: 'A', media_type: 'VIDEO', media_url: 'https://ig/a.mp4', timestamp: recent, caption: 'A' },
-            { id: 'B', media_type: 'IMAGE', media_url: 'https://ig/b.jpg', timestamp: recent, caption: 'B' },
-            { id: 'C', media_type: 'REELS', media_url: 'https://ig/c.mp4', timestamp: recent, caption: 'C' },
-            { id: 'D', media_type: 'VIDEO', media_url: 'https://ig/d.mp4', timestamp: old,    caption: 'D' },
-            { id: 'E', media_type: 'CAROUSEL_ALBUM', media_url: null, timestamp: recent },
-            { id: 'F', media_type: 'VIDEO', media_url: null, timestamp: recent }, // no URL — skip
-          ],
+          data: {
+            user: {
+              edge_owner_to_timeline_media: {
+                edges: [
+                  makeEdge({ id: '1', shortcode: 'A', is_video: true,  video_url: 'https://ig/a.mp4', display_url: 'https://ig/a.jpg', caption: 'cap A', taken_at_timestamp: recentSec }),
+                  makeEdge({ id: '2', shortcode: 'B', is_video: false, taken_at_timestamp: recentSec }), // photo — skip
+                  makeEdge({ id: '3', shortcode: 'C', is_video: true,  video_url: 'https://ig/c.mp4', taken_at_timestamp: oldSec }), // too old — skip
+                  makeEdge({ id: '4', shortcode: 'D', is_video: true,  taken_at_timestamp: recentSec }), // no video_url — skip
+                  makeEdge({ id: '5', shortcode: 'E', is_video: true,  video_url: 'https://ig/e.mp4', taken_at_timestamp: recentSec }),
+                ],
+              },
+            },
+          },
         },
       } as any);
 
-      const items = await listRecentVideos({
-        igUserId: 'ig-123',
-        accessToken: 'TOKEN',
-        sinceIso,
-      });
+      const items = await listRecentVideosByUsername({ username: 'joaomachado93', sinceIso });
 
-      expect(items.map((i) => i.id)).toEqual(['A', 'C']);
-      expect(items[0].mediaType).toBe('VIDEO');
-      expect(items[1].mediaType).toBe('REELS');
-    });
-
-    it('hits the Graph API media endpoint with the right params', async () => {
-      vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: [] } } as any);
-      await listRecentVideos({ igUserId: 'ig-XYZ', accessToken: 'TOK', sinceIso: new Date().toISOString() });
+      expect(items.map((i) => i.id)).toEqual(['1', '5']);
+      expect(items[0].caption).toBe('cap A');
+      expect(items[0].permalink).toBe('https://www.instagram.com/p/A/');
+      expect(items[0].mediaType).toBe('REELS');
 
       const call = vi.mocked(axios.get).mock.calls[0];
-      expect(call[0]).toBe('https://graph.facebook.com/v19.0/ig-XYZ/media');
-      expect((call[1] as any).params.access_token).toBe('TOK');
-      expect((call[1] as any).params.fields).toContain('media_url');
+      expect(call[0]).toContain('username=joaomachado93');
+      expect((call[1] as any).headers['X-IG-App-ID']).toBe('936619743392459');
+      expect((call[1] as any).headers['User-Agent']).toContain('Mozilla');
+    });
+
+    it('returns empty array when profile has no media', async () => {
+      vi.mocked(axios.get).mockResolvedValueOnce({
+        data: { data: { user: { edge_owner_to_timeline_media: { edges: [] } } } },
+      } as any);
+      const items = await listRecentVideosByUsername({ username: 'empty', sinceIso: new Date().toISOString() });
+      expect(items).toEqual([]);
+    });
+
+    it('handles missing user payload gracefully (returns empty)', async () => {
+      vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: { user: null } } } as any);
+      const items = await listRecentVideosByUsername({ username: 'gone', sinceIso: new Date().toISOString() });
+      expect(items).toEqual([]);
     });
   });
 
   describe('downloadAndStoreInR2', () => {
-    it('streams the IG CDN bytes into R2 with a user-scoped key', async () => {
+    it('streams IG CDN bytes into R2 with a user-scoped key', async () => {
       const bytes = Buffer.alloc(2048, 0x42);
       vi.mocked(axios.get).mockResolvedValueOnce({
         data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length),
@@ -71,12 +105,12 @@ describe('Instagram importer', () => {
       const result = await downloadAndStoreInR2({
         mediaUrl: 'https://ig-cdn/v.mp4',
         userId: 7,
-        igMediaId: 'igmedia42',
+        igMediaId: '12345678',
       });
 
       expect(result.mimeType).toBe('video/mp4');
       expect(result.size).toBe(2048);
-      expect(result.key).toMatch(/^users\/7\/instagram\/igmedia42-.*\.mp4$/);
+      expect(result.key).toMatch(/^users\/7\/instagram\/12345678-.*\.mp4$/);
 
       expect(uploadToR2).toHaveBeenCalledTimes(1);
       const uploadArgs = vi.mocked(uploadToR2).mock.calls[0];
@@ -97,6 +131,21 @@ describe('Instagram importer', () => {
       });
       expect(result.key.endsWith('.mov')).toBe(true);
       expect(result.mimeType).toBe('video/quicktime');
+    });
+
+    it('sanitizes unsafe characters from igMediaId in the storage key', async () => {
+      vi.mocked(axios.get).mockResolvedValueOnce({
+        data: new ArrayBuffer(8),
+        headers: { 'content-type': 'video/mp4' },
+      } as any);
+
+      const result = await downloadAndStoreInR2({
+        mediaUrl: 'https://ig-cdn/v.mp4',
+        userId: 1,
+        igMediaId: 'ab/cd ef?gh',
+      });
+      // Slashes, spaces, query chars stripped before the random UUID.
+      expect(result.key).toMatch(/^users\/1\/instagram\/abcdefgh-.*\.mp4$/);
     });
   });
 });
