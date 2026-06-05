@@ -10,7 +10,7 @@ export const users = pgTable('users', {
 export const platformAccounts = pgTable('platform_accounts', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
-  platform: text('platform', { enum: ['facebook', 'instagram', 'youtube'] }).notNull(),
+  platform: text('platform', { enum: ['facebook', 'instagram', 'youtube', 'tiktok'] }).notNull(),
   accountName: text('account_name'),
   accountId: text('account_id').notNull(),
   accessToken: text('access_token').notNull(),

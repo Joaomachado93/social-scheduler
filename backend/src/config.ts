@@ -26,6 +26,12 @@ export const config = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/platforms/youtube/callback',
   },
 
+  tiktok: {
+    clientKey: process.env.TIKTOK_CLIENT_KEY || '',
+    clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
+    redirectUri: process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3001/api/video/tiktok/callback',
+  },
+
   watermark: {
     position: process.env.WATERMARK_POSITION || 'southeast',
     opacity: parseFloat(process.env.WATERMARK_OPACITY || '0.7'),
@@ -63,6 +69,12 @@ export const config = {
       accessToken: process.env.OWNER_YT_ACCESS_TOKEN || '',
       refreshToken: process.env.OWNER_YT_REFRESH_TOKEN || '',
       channelName: process.env.OWNER_YT_CHANNEL_NAME || '',
+    },
+    tiktok: {
+      openId: process.env.OWNER_TIKTOK_OPEN_ID || '',
+      accessToken: process.env.OWNER_TIKTOK_ACCESS_TOKEN || '',
+      refreshToken: process.env.OWNER_TIKTOK_REFRESH_TOKEN || '',
+      displayName: process.env.OWNER_TIKTOK_DISPLAY_NAME || '',
     },
   },
 };

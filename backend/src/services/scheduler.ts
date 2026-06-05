@@ -5,6 +5,7 @@ import { eq, and, lte, inArray } from 'drizzle-orm';
 import { publishToFacebook } from './publishers/facebook.js';
 import { publishToInstagram, type PublisherMedia } from './publishers/instagram.js';
 import { publishToYouTube } from './publishers/youtube.js';
+import { publishToTikTok } from './publishers/tiktok.js';
 import { getPublicUrl } from './storage.js';
 import { cleanupMediaForPost, cleanupOrphanedMedia } from './cleanup.js';
 
@@ -116,6 +117,17 @@ export async function publishPost(post: { id: number; caption: string | null; sc
             post.caption || '',
             publisherMedia,
           );
+          break;
+
+        case 'tiktok':
+          platformPostId = await publishToTikTok({
+            platformAccountId: account.id,
+            accessToken: account.accessToken,
+            refreshToken: account.refreshToken,
+            title: post.caption?.split('\n')[0] || 'Untitled',
+            description: post.caption || '',
+            mediaFiles: publisherMedia,
+          });
           break;
 
         default:
