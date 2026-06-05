@@ -39,6 +39,16 @@ export const config = {
     scale: parseFloat(process.env.WATERMARK_SCALE || '0.15'),
   },
 
+  // Background job that pulls the user's IG videos and schedules them to
+  // publish on YouTube Shorts + TikTok. No UI — runs on a cron.
+  instagramAutoSync: {
+    enabled: (process.env.IG_AUTOSYNC_ENABLED || 'false').toLowerCase() === 'true',
+    cron: process.env.IG_AUTOSYNC_CRON || '0 */6 * * *',
+    lookbackHours: parseInt(process.env.IG_AUTOSYNC_LOOKBACK_HOURS || '48', 10),
+    spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '24', 10),
+    minDelayMinutes: parseInt(process.env.IG_AUTOSYNC_MIN_DELAY_MINUTES || '60', 10),
+  },
+
   r2: {
     accountId: process.env.R2_ACCOUNT_ID || '',
     accessKeyId: process.env.R2_ACCESS_KEY_ID || '',

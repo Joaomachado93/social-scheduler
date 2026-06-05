@@ -2,12 +2,14 @@ import cron from 'node-cron';
 import { db } from '../db/index.js';
 import { posts, postPlatforms, media, platformAccounts, publishLogs } from '../db/schema.js';
 import { eq, and, lte, inArray } from 'drizzle-orm';
+import { config } from '../config.js';
 import { publishToFacebook } from './publishers/facebook.js';
 import { publishToInstagram, type PublisherMedia } from './publishers/instagram.js';
 import { publishToYouTube } from './publishers/youtube.js';
 import { publishToTikTok } from './publishers/tiktok.js';
 import { getPublicUrl } from './storage.js';
 import { cleanupMediaForPost, cleanupOrphanedMedia } from './cleanup.js';
+import { runInstagramAutoSync } from './jobs/instagramAutoSync.js';
 
 export function startScheduler() {
   cron.schedule('* * * * *', async () => {
@@ -42,6 +44,19 @@ export function startScheduler() {
       console.error('[cleanup] failed:', err);
     }
   });
+
+  // Instagram → YouTube Shorts + TikTok auto-sync.
+  // Off by default; enable via IG_AUTOSYNC_ENABLED=true.
+  if (config.instagramAutoSync.enabled) {
+    cron.schedule(config.instagramAutoSync.cron, async () => {
+      try {
+        await runInstagramAutoSync();
+      } catch (err) {
+        console.error('[ig-auto-sync] crashed:', err);
+      }
+    });
+    console.log(`Instagram auto-sync enabled (cron: ${config.instagramAutoSync.cron})`);
+  }
 
   console.log('Scheduler started - checking every minute');
 }

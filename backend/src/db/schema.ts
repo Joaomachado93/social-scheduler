@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, integer, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -68,3 +68,14 @@ export const publishLogs = pgTable('publish_logs', {
   details: text('details'),
   createdAt: timestamp('created_at', { mode: 'string', withTimezone: false }).notNull().defaultNow(),
 });
+
+export const instagramImports = pgTable('instagram_imports', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  igMediaId: text('ig_media_id').notNull(),
+  igPermalink: text('ig_permalink'),
+  postId: integer('post_id').notNull().references(() => posts.id),
+  importedAt: timestamp('imported_at', { mode: 'string', withTimezone: false }).notNull().defaultNow(),
+}, (t) => ({
+  userMediaUnique: uniqueIndex('instagram_imports_user_media_uniq').on(t.userId, t.igMediaId),
+}));
