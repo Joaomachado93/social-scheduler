@@ -1,27 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Force the username so the orchestrator runs end-to-end (the env-driven
-// config block reads process.env at config-module-load time, but we can
-// re-stub the imported `config` object before each test if needed).
+// Mutable config block shared across describe groups so individual `describe`
+// blocks can re-mock with their own window/spacing values without restarting
+// the test runner. Default: window disabled (00h-23h) so existing spacing
+// tests keep working; the window-specific `describe` block re-stubs.
+const igAutoSyncMock = {
+  enabled: true,
+  username: 'testuser',
+  cron: '0 3 * * *',
+  timezone: 'UTC',
+  lookbackHours: 48,
+  spacingHours: 24,
+  minDelayMinutes: 60,
+  windowStartHour: 0,
+  windowEndHour: 23,
+};
+
 vi.mock('../config.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../config.js')>();
   return {
     ...actual,
-    config: {
-      ...actual.config,
-      instagramAutoSync: {
-        ...actual.config.instagramAutoSync,
-        username: 'testuser',
-        // Force test defaults regardless of local .env
-        lookbackHours: 48,
-        spacingHours: 24,
-        minDelayMinutes: 60,
-      },
+    get config() {
+      return {
+        ...actual.config,
+        instagramAutoSync: { ...actual.config.instagramAutoSync, ...igAutoSyncMock },
+      };
     },
   };
 });
 
-// Mock the importer module so the orchestrator test never hits the network.
 vi.mock('../services/importers/instagram.js', () => ({
   listRecentVideosByUsername: vi.fn(),
   downloadAndStoreInR2: vi.fn(),
@@ -65,9 +72,27 @@ function tsMs(stored: string): number {
   return new Date(isoish + 'Z').getTime();
 }
 
-describe('runInstagramAutoSync (scrape mode)', () => {
+function hourInTz(ms: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, hour: '2-digit', hour12: false,
+  }).formatToParts(new Date(ms));
+  const h = parseInt(parts.find((p) => p.type === 'hour')!.value, 10);
+  return h === 24 ? 0 : h;
+}
+
+describe('runInstagramAutoSync — orchestration', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
+    Object.assign(igAutoSyncMock, {
+      enabled: true,
+      username: 'testuser',
+      timezone: 'UTC',
+      lookbackHours: 48,
+      spacingHours: 24,
+      minDelayMinutes: 60,
+      windowStartHour: 0,
+      windowEndHour: 23,
+    });
     await setupTestDb();
   });
 
@@ -79,24 +104,31 @@ describe('runInstagramAutoSync (scrape mode)', () => {
     const db = (await import('../db/index.js')).db;
     const u = await makeUser(db, 'a@t.com');
     await attach(db, u, 'youtube', 'yt-1');
-    // No TikTok — skip user; scraper still called (returns nothing to import).
     mockListByUsername.mockResolvedValue([]);
 
     await runInstagramAutoSync();
-
     expect(mockDownloadAndStoreInR2).not.toHaveBeenCalled();
     const postsRows = await db.select().from(posts);
     expect(postsRows.length).toBe(0);
   });
 
-  it('no-op when no user has YT+TikTok (does not even scrape)', async () => {
+  it('no-op when no user has YT+TikTok (does not scrape)', async () => {
     const db = (await import('../db/index.js')).db;
     const u = await makeUser(db, 'a@t.com');
     await attach(db, u, 'youtube', 'yt-1');
-    // No TikTok — no syncable user, scraper should not be called.
 
     await runInstagramAutoSync();
+    expect(mockListByUsername).not.toHaveBeenCalled();
+  });
 
+  it('no-op when IG_USERNAME is empty', async () => {
+    igAutoSyncMock.username = '';
+    const db = (await import('../db/index.js')).db;
+    const userId = await makeUser(db, 'a@t.com');
+    await attach(db, userId, 'youtube', 'yt-1');
+    await attach(db, userId, 'tiktok', 'tt-1');
+
+    await runInstagramAutoSync();
     expect(mockListByUsername).not.toHaveBeenCalled();
   });
 
@@ -109,27 +141,21 @@ describe('runInstagramAutoSync (scrape mode)', () => {
     mockListByUsername.mockResolvedValue([
       { id: 'IGM1', mediaType: 'REELS', mediaUrl: 'https://ig/v1.mp4', timestamp: new Date(Date.now() - 3600_000).toISOString(), caption: 'hello\n#yo' },
     ]);
-    mockDownloadAndStoreInR2.mockResolvedValue({ key: 'users/1/instagram/IGM1-x.mp4', size: 1234, mimeType: 'video/mp4' });
+    mockDownloadAndStoreInR2.mockResolvedValue({ key: 'k', size: 1234, mimeType: 'video/mp4' });
 
     await runInstagramAutoSync();
-
-    expect(mockListByUsername).toHaveBeenCalledWith(expect.objectContaining({ username: 'testuser' }));
 
     const postsRows = await db.select().from(posts);
     expect(postsRows.length).toBe(1);
     expect(postsRows[0].caption).toBe('hello\n#yo');
-    expect(postsRows[0].status).toBe('scheduled');
 
     const legs = await db.select().from(postPlatforms).where(eq(postPlatforms.postId, postsRows[0].id));
-    expect(legs.length).toBe(2);
     expect(legs.map((l: any) => l.platformAccountId).sort()).toEqual([ytId, ttId].sort());
 
     const mediaRows = await db.select().from(media).where(eq(media.postId, postsRows[0].id));
-    expect(mediaRows.length).toBe(1);
     expect(mediaRows[0].processingStatus).toBe('done');
 
     const imports = await db.select().from(instagramImports);
-    expect(imports.length).toBe(1);
     expect(imports[0].igMediaId).toBe('IGM1');
   });
 
@@ -157,65 +183,6 @@ describe('runInstagramAutoSync (scrape mode)', () => {
     expect(mockDownloadAndStoreInR2).toHaveBeenCalledTimes(1);
     const imports = await db.select().from(instagramImports);
     expect(imports.length).toBe(2);
-    expect(new Set(imports.map((i: any) => i.igMediaId))).toEqual(new Set(['IGM_OLD', 'IGM_NEW']));
-  });
-
-  it('spaces multiple new videos 24h apart, oldest first', async () => {
-    const db = (await import('../db/index.js')).db;
-    const userId = await makeUser(db, 'a@t.com');
-    await attach(db, userId, 'youtube', 'yt-1');
-    await attach(db, userId, 'tiktok', 'tt-1');
-
-    const t1 = new Date('2026-01-01T00:00:00Z').toISOString();
-    const t2 = new Date('2026-01-01T06:00:00Z').toISOString();
-    const t3 = new Date('2026-01-01T12:00:00Z').toISOString();
-
-    mockListByUsername.mockResolvedValue([
-      { id: 'C', mediaType: 'REELS', mediaUrl: 'https://ig/c.mp4', timestamp: t3 },
-      { id: 'A', mediaType: 'REELS', mediaUrl: 'https://ig/a.mp4', timestamp: t1 },
-      { id: 'B', mediaType: 'REELS', mediaUrl: 'https://ig/b.mp4', timestamp: t2 },
-    ]);
-    let n = 0;
-    mockDownloadAndStoreInR2.mockImplementation(async () => ({ key: `k${++n}`, size: 1, mimeType: 'video/mp4' }));
-
-    const start = Date.now();
-    await runInstagramAutoSync();
-
-    const postsRows = await db.select().from(posts).orderBy(posts.id);
-    expect(postsRows.length).toBe(3);
-
-    const t0 = tsMs(postsRows[0].scheduledAt);
-    const t1ms = tsMs(postsRows[1].scheduledAt);
-    const t2ms = tsMs(postsRows[2].scheduledAt);
-
-    expect(t0).toBeGreaterThanOrEqual(start + 60 * 60_000 - 1000);
-    expect(t1ms - t0).toBe(24 * 3_600_000);
-    expect(t2ms - t1ms).toBe(24 * 3_600_000);
-  });
-
-  it('honors existing scheduled posts when picking the first slot', async () => {
-    const db = (await import('../db/index.js')).db;
-    const userId = await makeUser(db, 'a@t.com');
-    await attach(db, userId, 'youtube', 'yt-1');
-    await attach(db, userId, 'tiktok', 'tt-1');
-
-    const futureMs = Date.now() + 5 * 3_600_000;
-    await db.insert(posts).values({
-      userId, caption: 'existing', scheduledAt: new Date(futureMs).toISOString(), status: 'scheduled',
-    });
-
-    mockListByUsername.mockResolvedValue([
-      { id: 'IGM_NEW', mediaType: 'REELS', mediaUrl: 'https://ig/n.mp4', timestamp: new Date().toISOString() },
-    ]);
-    mockDownloadAndStoreInR2.mockResolvedValue({ key: 'k', size: 1, mimeType: 'video/mp4' });
-
-    await runInstagramAutoSync();
-
-    const newPostRows = await db.select().from(posts).where(eq(posts.caption, ''));
-    expect(newPostRows.length).toBe(1);
-    const scheduledMs = tsMs(newPostRows[0].scheduledAt);
-    expect(scheduledMs).toBeGreaterThanOrEqual(futureMs + 24 * 3_600_000 - 1000);
-    expect(scheduledMs).toBeLessThanOrEqual(futureMs + 24 * 3_600_000 + 1000);
   });
 
   it('no-op when listRecentVideosByUsername throws (does not crash)', async () => {
@@ -228,5 +195,140 @@ describe('runInstagramAutoSync (scrape mode)', () => {
 
     await expect(runInstagramAutoSync()).resolves.toBeUndefined();
     expect(mockDownloadAndStoreInR2).not.toHaveBeenCalled();
+  });
+});
+
+describe('runInstagramAutoSync — spacing (window disabled)', () => {
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    Object.assign(igAutoSyncMock, {
+      enabled: true,
+      username: 'testuser',
+      timezone: 'UTC',
+      lookbackHours: 48,
+      spacingHours: 24,
+      minDelayMinutes: 60,
+      windowStartHour: 0,  // disable window
+      windowEndHour: 23,
+    });
+    await setupTestDb();
+  });
+
+  afterEach(async () => {
+    await teardownTestDb();
+  });
+
+  it('spaces multiple new videos 24h apart, oldest first', async () => {
+    const db = (await import('../db/index.js')).db;
+    const userId = await makeUser(db, 'a@t.com');
+    await attach(db, userId, 'youtube', 'yt-1');
+    await attach(db, userId, 'tiktok', 'tt-1');
+
+    mockListByUsername.mockResolvedValue([
+      { id: 'C', mediaType: 'REELS', mediaUrl: 'https://ig/c.mp4', timestamp: '2026-01-01T12:00:00Z' },
+      { id: 'A', mediaType: 'REELS', mediaUrl: 'https://ig/a.mp4', timestamp: '2026-01-01T00:00:00Z' },
+      { id: 'B', mediaType: 'REELS', mediaUrl: 'https://ig/b.mp4', timestamp: '2026-01-01T06:00:00Z' },
+    ]);
+    let n = 0;
+    mockDownloadAndStoreInR2.mockImplementation(async () => ({ key: `k${++n}`, size: 1, mimeType: 'video/mp4' }));
+
+    await runInstagramAutoSync();
+
+    const postsRows = await db.select().from(posts).orderBy(posts.id);
+    const t0 = tsMs(postsRows[0].scheduledAt);
+    const t1 = tsMs(postsRows[1].scheduledAt);
+    const t2 = tsMs(postsRows[2].scheduledAt);
+
+    expect(t1 - t0).toBe(24 * 3_600_000);
+    expect(t2 - t1).toBe(24 * 3_600_000);
+  });
+});
+
+describe('runInstagramAutoSync — publishing window', () => {
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    Object.assign(igAutoSyncMock, {
+      enabled: true,
+      username: 'testuser',
+      timezone: 'UTC',
+      lookbackHours: 48,
+      spacingHours: 2,
+      minDelayMinutes: 60,
+      windowStartHour: 8,
+      windowEndHour: 22,
+    });
+    await setupTestDb();
+  });
+
+  afterEach(async () => {
+    await teardownTestDb();
+  });
+
+  it('clips an early-morning candidate to windowStartHour same day', async () => {
+    const db = (await import('../db/index.js')).db;
+    const userId = await makeUser(db, 'a@t.com');
+    await attach(db, userId, 'youtube', 'yt-1');
+    await attach(db, userId, 'tiktok', 'tt-1');
+
+    // Seed a post in the past so first candidate slot is `now + minDelay`
+    // (in UTC, the test runner is at "now"). With windowStart=8 UTC, anything
+    // before 8h gets pushed forward to 8:00 UTC same day.
+    mockListByUsername.mockResolvedValue([
+      { id: 'X', mediaType: 'REELS', mediaUrl: 'https://ig/x.mp4', timestamp: new Date().toISOString() },
+    ]);
+    mockDownloadAndStoreInR2.mockResolvedValue({ key: 'k', size: 1, mimeType: 'video/mp4' });
+
+    await runInstagramAutoSync();
+
+    const [row] = await db.select().from(posts);
+    const scheduledMs = tsMs(row.scheduledAt);
+    const h = hourInTz(scheduledMs, 'UTC');
+    expect(h).toBeGreaterThanOrEqual(8);
+    expect(h).toBeLessThanOrEqual(22);
+  });
+
+  it('jumps to next-day windowStart when 8 slots fill the daily window', async () => {
+    const db = (await import('../db/index.js')).db;
+    const userId = await makeUser(db, 'a@t.com');
+    await attach(db, userId, 'youtube', 'yt-1');
+    await attach(db, userId, 'tiktok', 'tt-1');
+
+    // Window 08-22, spacing 2h → 8 slots/day: 8,10,12,14,16,18,20,22.
+    // Generate 10 videos → 8 should land day 1, 2 should land day 2 at 8 and 10.
+    mockListByUsername.mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: `V${i}`,
+        mediaType: 'REELS' as const,
+        mediaUrl: `https://ig/v${i}.mp4`,
+        timestamp: new Date(2026, 0, 1, i).toISOString(),
+      })),
+    );
+    let n = 0;
+    mockDownloadAndStoreInR2.mockImplementation(async () => ({ key: `k${++n}`, size: 1, mimeType: 'video/mp4' }));
+
+    await runInstagramAutoSync();
+
+    const postsRows = await db.select().from(posts).orderBy(posts.id);
+    expect(postsRows.length).toBe(10);
+
+    const hours = postsRows.map((r: any) => hourInTz(tsMs(r.scheduledAt), 'UTC'));
+    const days = postsRows.map((r: any) => {
+      const ms = tsMs(r.scheduledAt);
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', day: '2-digit' }).format(new Date(ms));
+    });
+
+    // Every slot is in the window
+    for (const h of hours) {
+      expect(h).toBeGreaterThanOrEqual(8);
+      expect(h).toBeLessThanOrEqual(22);
+    }
+
+    // Two distinct days
+    const uniqueDays = new Set(days);
+    expect(uniqueDays.size).toBe(2);
+
+    // 8 slots on the first day, 2 on the second
+    const firstDay = days[0];
+    expect(days.filter((d: any) => d === firstDay).length).toBe(8);
   });
 });

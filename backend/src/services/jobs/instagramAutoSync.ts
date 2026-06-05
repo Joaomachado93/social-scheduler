@@ -72,6 +72,114 @@ function parseStoredTimestampAsUtc(s: string): number {
   return new Date(isoish + 'Z').getTime();
 }
 
+interface LocalParts {
+  year: number;
+  month: number; // 1-12
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+/** Extract the wall-clock parts of a UTC instant in a given IANA timezone. */
+function utcMsToLocalParts(utcMs: number, tz: string): LocalParts {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(new Date(utcMs));
+  const get = (t: string) => parseInt(parts.find((p) => p.type === t)!.value, 10);
+  let hour = get('hour');
+  if (hour === 24) hour = 0; // Intl can emit 24 for midnight
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour,
+    minute: get('minute'),
+    second: get('second'),
+  };
+}
+
+/** Convert wall-clock parts back to a UTC ms instant in a given timezone. */
+function localPartsToUtcMs(parts: LocalParts, tz: string): number {
+  const wantedUtcEquivalent = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+  let guess = wantedUtcEquivalent;
+  // Iterate to converge; one step usually suffices, two handles DST switches.
+  for (let i = 0; i < 3; i++) {
+    const local = utcMsToLocalParts(guess, tz);
+    const localAsUtc = Date.UTC(
+      local.year,
+      local.month - 1,
+      local.day,
+      local.hour,
+      local.minute,
+      local.second,
+    );
+    const offset = wantedUtcEquivalent - localAsUtc;
+    if (offset === 0) return guess;
+    guess += offset;
+  }
+  return guess;
+}
+
+/**
+ * Clip a candidate slot to the daily publishing window in the configured
+ * timezone. If candidate is before windowStartHour, push forward to that
+ * hour same day. If after windowEndHour, push to windowStartHour next day.
+ * Hours are inclusive on both ends: 22:00 is a valid slot when
+ * windowEndHour=22, but 22:01 is not.
+ */
+function clipSlotToWindow(
+  candidateMs: number,
+  windowStartHour: number,
+  windowEndHour: number,
+  tz: string,
+): number {
+  const parts = utcMsToLocalParts(candidateMs, tz);
+  const slotMinutes = parts.hour * 60 + parts.minute;
+  const startMinutes = windowStartHour * 60;
+  const endMinutes = windowEndHour * 60;
+
+  if (slotMinutes < startMinutes) {
+    return localPartsToUtcMs(
+      { ...parts, hour: windowStartHour, minute: 0, second: 0 },
+      tz,
+    );
+  }
+  if (slotMinutes > endMinutes) {
+    // Push to windowStart of the NEXT calendar day in tz.
+    const tomorrowUtcMidnight =
+      Date.UTC(parts.year, parts.month - 1, parts.day) + 24 * 3_600_000;
+    const t = new Date(tomorrowUtcMidnight);
+    return localPartsToUtcMs(
+      {
+        year: t.getUTCFullYear(),
+        month: t.getUTCMonth() + 1,
+        day: t.getUTCDate(),
+        hour: windowStartHour,
+        minute: 0,
+        second: 0,
+      },
+      tz,
+    );
+  }
+  return candidateMs;
+}
+
 async function importVideoForUser(
   target: SyncTarget,
   video: IgMediaItem,
@@ -143,8 +251,9 @@ async function syncOneUser(
 
   if (fresh.length === 0) return stats;
 
-  const minDelayMs = config.instagramAutoSync.minDelayMinutes * 60_000;
-  const spacingMs = config.instagramAutoSync.spacingHours * 3_600_000;
+  const { minDelayMinutes, spacingHours, windowStartHour, windowEndHour, timezone } = config.instagramAutoSync;
+  const minDelayMs = minDelayMinutes * 60_000;
+  const spacingMs = spacingHours * 3_600_000;
   const now = Date.now();
 
   const latestRow = await db.select({ scheduledAt: posts.scheduledAt })
@@ -156,13 +265,21 @@ async function syncOneUser(
     ? parseStoredTimestampAsUtc(latestRow[0].scheduledAt)
     : 0;
 
-  let slot = Math.max(now + minDelayMs, lastTs + spacingMs);
+  // First slot: max(now+minDelay, lastTs+spacing), then clip to window.
+  let slot = clipSlotToWindow(
+    Math.max(now + minDelayMs, lastTs + spacingMs),
+    windowStartHour,
+    windowEndHour,
+    timezone,
+  );
 
   for (const video of fresh) {
     try {
       await importVideoForUser(target, video, new Date(slot).toISOString());
       stats.imported++;
-      slot += spacingMs;
+      // Advance + re-clip. Clipping handles the day-boundary jump when the
+      // next raw slot falls past windowEndHour.
+      slot = clipSlotToWindow(slot + spacingMs, windowStartHour, windowEndHour, timezone);
     } catch (err: any) {
       stats.failed++;
       console.error(`[ig-auto-sync] user ${target.userId}: import of IG ${video.id} failed:`, err?.message || err);

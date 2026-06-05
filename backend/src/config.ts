@@ -42,13 +42,22 @@ export const config = {
   // Background job that scrapes a public Instagram profile and schedules
   // each new video for publication on YouTube Shorts + TikTok. No UI —
   // runs on a cron. Single-tenant: one IG_USERNAME per deployment.
+  //
+  // Publishing-window model: the sync cron runs once a day (default 3am
+  // local), spacing videos `spacingHours` apart but only within
+  // [windowStartHour, windowEndHour] in the configured timezone. Slots
+  // that would fall outside the window are pushed to windowStartHour of
+  // the next day.
   instagramAutoSync: {
     enabled: (process.env.IG_AUTOSYNC_ENABLED || 'false').toLowerCase() === 'true',
     username: process.env.IG_USERNAME || '',
-    cron: process.env.IG_AUTOSYNC_CRON || '0 */6 * * *',
+    cron: process.env.IG_AUTOSYNC_CRON || '0 3 * * *',
+    timezone: process.env.IG_AUTOSYNC_TIMEZONE || 'Europe/Lisbon',
     lookbackHours: parseInt(process.env.IG_AUTOSYNC_LOOKBACK_HOURS || '48', 10),
-    spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '24', 10),
+    spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '2', 10),
     minDelayMinutes: parseInt(process.env.IG_AUTOSYNC_MIN_DELAY_MINUTES || '60', 10),
+    windowStartHour: parseInt(process.env.IG_AUTOSYNC_WINDOW_START_HOUR || '8', 10),
+    windowEndHour: parseInt(process.env.IG_AUTOSYNC_WINDOW_END_HOUR || '22', 10),
   },
 
   r2: {
