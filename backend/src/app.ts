@@ -7,6 +7,7 @@ import { postRoutes } from './routes/posts.js';
 import { platformRoutes } from './routes/platforms.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { videoRoutes } from './routes/video.js';
+import { adminRoutes } from './routes/admin.js';
 
 export interface BuildAppOptions {
     logger?: boolean;
@@ -50,6 +51,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     await app.register(platformRoutes);
     await app.register(videoRoutes);
     await app.register(dashboardRoutes);
+    await app.register(adminRoutes);
 
   app.get('/api/health', () => ({ status: 'ok' }));
 
