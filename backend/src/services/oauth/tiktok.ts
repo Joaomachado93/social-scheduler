@@ -7,11 +7,14 @@ const TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/';
 const USER_INFO_URL = 'https://open.tiktokapis.com/v2/user/info/';
 
 export function getTikTokAuthUrl(state: string): string {
+  // Trim here too — authorize and exchange MUST send the exact same
+  // redirect_uri or TikTok rejects with invalid_client. Without trim, a
+  // trailing newline on the Render env var would produce a mismatch.
   const params = new URLSearchParams({
-    client_key: process.env.TIKTOK_CLIENT_KEY || '',
+    client_key: (process.env.TIKTOK_CLIENT_KEY || '').trim(),
     response_type: 'code',
     scope: 'user.info.basic,video.upload,video.publish',
-    redirect_uri: process.env.TIKTOK_REDIRECT_URI || '',
+    redirect_uri: (process.env.TIKTOK_REDIRECT_URI || '').trim(),
     state,
   });
   return `${AUTHORIZE_URL}?${params.toString()}`;
@@ -41,6 +44,21 @@ export async function exchangeTikTokCode(code: string): Promise<TikTokAccountInf
   const clientKey = (process.env.TIKTOK_CLIENT_KEY || '').trim();
   const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim();
   const redirectUri = (process.env.TIKTOK_REDIRECT_URI || '').trim();
+
+  // Diagnostic: surface raw byte lengths so invisible chars (BOM, NBSP) show
+  // up as a length mismatch in logs without leaking the actual secret values.
+  console.log(
+    '[tiktok-exchange] lens',
+    JSON.stringify({
+      key_raw: (process.env.TIKTOK_CLIENT_KEY || '').length,
+      key_trim: clientKey.length,
+      sec_raw: (process.env.TIKTOK_CLIENT_SECRET || '').length,
+      sec_trim: clientSecret.length,
+      redir_raw: (process.env.TIKTOK_REDIRECT_URI || '').length,
+      redir_trim: redirectUri.length,
+      code_len: code.length,
+    }),
+  );
 
   const tokenRes = await postForm(TOKEN_URL, {
     client_key: clientKey,
