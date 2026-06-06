@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
 import { uploadToR2 } from '../services/storage.js';
+import { publishToTikTokInbox } from '../services/publishers/tiktok.js';
 import { db } from '../db/index.js';
 import { posts, media, postPlatforms, platformAccounts, publishLogs } from '../db/schema.js';
 import { inArray, eq, desc } from 'drizzle-orm';
@@ -117,6 +118,44 @@ export async function adminRoutes(app: FastifyInstance) {
       return { ok: true, postId: result.id, scheduledAt, r2Key: key, sizeBytes: buf.length };
     } catch (err: any) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
+      return reply.status(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // Direct one-shot smoke test of the TikTok Inbox publisher. Bypasses
+  // the scheduler and the TIKTOK_INBOX_MODE flag — calls
+  // publishToTikTokInbox in-process with a downloaded video URL.
+  app.post('/api/admin/probe-tiktok-inbox', async (request, reply) => {
+    const secret = process.env.ADMIN_SECRET || '';
+    if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
+    const provided = (request.headers['x-admin-secret'] || '') as string;
+    if (provided !== secret) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const body = (request.body || {}) as { videoUrl?: string };
+    if (!body.videoUrl) return reply.status(400).send({ error: 'videoUrl required' });
+
+    const [tt] = await db.select().from(platformAccounts)
+      .where(inArray(platformAccounts.platform, ['tiktok']))
+      .limit(1);
+    if (!tt) return reply.status(400).send({ error: 'No TikTok account connected' });
+
+    try {
+      const publishId = await publishToTikTokInbox({
+        platformAccountId: tt.id,
+        accessToken: tt.accessToken,
+        refreshToken: tt.refreshToken,
+        title: 'inbox-probe',
+        description: '',
+        mediaFiles: [{
+          id: 0,
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          publicUrl: body.videoUrl,
+        }],
+      });
+      return { ok: true, publishId, accountName: tt.accountName };
+    } catch (err: any) {
+      app.log.error({ err: err.message }, 'probe-tiktok-inbox failed');
       return reply.status(500).send({ ok: false, error: err.message });
     }
   });
