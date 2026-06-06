@@ -55,8 +55,13 @@ export async function adminRoutes(app: FastifyInstance) {
       videoUrl?: string;
       caption?: string;
       scheduleInSeconds?: number;
+      scheduledAtIso?: string;
+      platforms?: Array<'youtube' | 'tiktok'>;
     };
     if (!body.videoUrl) return reply.status(400).send({ error: 'videoUrl required' });
+    const platformsFilter = body.platforms && body.platforms.length > 0
+      ? body.platforms
+      : ['youtube', 'tiktok'];
 
     try {
       const accounts = await db.select().from(platformAccounts).where(
@@ -72,11 +77,15 @@ export async function adminRoutes(app: FastifyInstance) {
       let userId: number | null = null;
       let yt: typeof accounts[0] | undefined;
       let tt: typeof accounts[0] | undefined;
+      const wantYt = platformsFilter.includes('youtube');
+      const wantTt = platformsFilter.includes('tiktok');
       for (const [uid, e] of byUser) {
-        if (e.yt && e.tt) { userId = uid; yt = e.yt; tt = e.tt; break; }
+        const ytOk = !wantYt || !!e.yt;
+        const ttOk = !wantTt || !!e.tt;
+        if (ytOk && ttOk) { userId = uid; yt = e.yt; tt = e.tt; break; }
       }
-      if (!userId || !yt || !tt) {
-        return reply.status(400).send({ error: 'No user with both YT and TikTok connected' });
+      if (!userId) {
+        return reply.status(400).send({ error: `No user with ${platformsFilter.join('+')} connected` });
       }
 
       const dl = await axios.get<ArrayBuffer>(body.videoUrl, { responseType: 'arraybuffer' });
@@ -85,8 +94,8 @@ export async function adminRoutes(app: FastifyInstance) {
       const key = `tests/${randomUUID()}.mp4`;
       await uploadToR2(key, buf, 'video/mp4');
 
-      const delay = (body.scheduleInSeconds ?? 120) * 1000;
-      const scheduledAt = new Date(Date.now() + delay).toISOString();
+      const scheduledAt = body.scheduledAtIso
+        ?? new Date(Date.now() + (body.scheduleInSeconds ?? 120) * 1000).toISOString();
 
       const result = await db.transaction(async (tx) => {
         const [post] = await tx.insert(posts).values({
@@ -107,15 +116,15 @@ export async function adminRoutes(app: FastifyInstance) {
           processingStatus: 'done',
         });
 
-        await tx.insert(postPlatforms).values([
-          { postId: post.id, platformAccountId: yt!.id },
-          { postId: post.id, platformAccountId: tt!.id },
-        ]);
+        const legs: { postId: number; platformAccountId: number }[] = [];
+        if (wantYt && yt) legs.push({ postId: post.id, platformAccountId: yt.id });
+        if (wantTt && tt) legs.push({ postId: post.id, platformAccountId: tt.id });
+        if (legs.length > 0) await tx.insert(postPlatforms).values(legs);
 
         return post;
       });
 
-      return { ok: true, postId: result.id, scheduledAt, r2Key: key, sizeBytes: buf.length };
+      return { ok: true, postId: result.id, scheduledAt, r2Key: key, sizeBytes: buf.length, platforms: platformsFilter };
     } catch (err: any) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
       return reply.status(500).send({ ok: false, error: err.message });
