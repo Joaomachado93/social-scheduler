@@ -142,12 +142,19 @@ export async function publishPost(post: { id: number; caption: string | null; sc
             .trim()
             .slice(0, 95);
           const title = cleanTitle || 'Untitled';
+          // Prepend #Shorts to the description so YT picks up the Shorts
+          // signal immediately. Vertical short videos already auto-classify,
+          // but the explicit tag boosts reach in the Shorts feed.
+          const rawDescription = post.caption || '';
+          const description = rawDescription.startsWith('#Shorts')
+            ? rawDescription
+            : `#Shorts\n\n${rawDescription}`.trimEnd();
           platformPostId = await publishToYouTube(
             account.id,
             account.accessToken,
             account.refreshToken,
             title,
-            post.caption || '',
+            description,
             publisherMedia,
           );
           break;
