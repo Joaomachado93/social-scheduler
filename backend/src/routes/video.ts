@@ -82,8 +82,9 @@ export async function videoRoutes(app: FastifyInstance) {
 
       return reply.redirect(`${config.appUrl}/video/platforms?connected=tiktok`);
     } catch (err: any) {
-      console.error('TikTok OAuth error:', err.message);
-      return reply.redirect(`${config.appUrl}/video/platforms?error=tiktok_auth_failed`);
+const detail = encodeURIComponent(err.message || 'unknown');
+              app.log.error({ err: err.message }, 'TikTok OAuth callback error');
+              return reply.redirect(`${config.appUrl}/video/platforms?error=tiktok_auth_failed&detail=${detail}`);
     }
   });
 
