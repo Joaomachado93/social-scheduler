@@ -7,128 +7,102 @@ const TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/';
 const USER_INFO_URL = 'https://open.tiktokapis.com/v2/user/info/';
 
 export function getTikTokAuthUrl(state: string): string {
-    const params = new URLSearchParams({
-          client_key: process.env.TIKTOK_CLIENT_KEY || '',
-          response_type: 'code',
-          scope: 'user.info.basic,video.publish,video.upload',
-          redirect_uri: process.env.TIKTOK_REDIRECT_URI || '',
-          state,
-    });
-    return `${AUTHORIZE_URL}?${params.toString()}`;
+        const params = new URLSearchParams({
+                        client_key: process.env.TIKTOK_CLIENT_KEY || '',
+                        response_type: 'code',
+                        scope: 'user.info.basic,video.publish,video.upload',
+                        redirect_uri: process.env.TIKTOK_REDIRECT_URI || '',
+                        state,
+        });
+        return `${AUTHORIZE_URL}?${params.toString()}`;
 }
 
 export type TikTokAccountInfo = {
-    platform: 'tiktok';
-    accountId: string;
-    accountName: string;
-    accessToken: string;
-    refreshToken: string;
-    tokenExpires: string | null;
+        platform: 'tiktok';
+        accountId: string;
+        username: string;
+        displayName: string;
+        avatarUrl: string;
+        accessToken: string;
+        refreshToken: string;
+        tokenExpiresAt: Date;
 };
 
 export async function exchangeTikTokCode(code: string): Promise<TikTokAccountInfo> {
-    const clientKey = (process.env.TIKTOK_CLIENT_KEY || '').trim();
-    const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim();
-    const redirectUri = (process.env.TIKTOK_REDIRECT_URI || '').trim();
+        const client_key = process.env.TIKTOK_CLIENT_KEY || '';
+        const client_secret = process.env.TIKTOK_CLIENT_SECRET || '';
+        const redirect_uri = process.env.TIKTOK_REDIRECT_URI || '';
 
-  // Explicitly decode the code in case Fastify didn't fully decode it
-  const decodedCode = decodeURIComponent(code);
+    const params = new URLSearchParams();
+        params.append('client_key', client_key);
+        params.append('client_secret', client_secret);
+        params.append('code', code);
+        params.append('grant_type', 'authorization_code');
+        params.append('redirect_uri', redirect_uri);
 
-  console.log('[TikTok] Starting token exchange with client_key:', clientKey.substring(0, 8) + '...');
-    console.log('[TikTok] client_secret last 4:', clientSecret.slice(-4));
-    console.log('[TikTok] client_key length:', clientKey.length);
-    console.log('[TikTok] client_secret length:', clientSecret.length);
-    console.log('[TikTok] redirect_uri:', redirectUri);
-    console.log('[TikTok] raw code length:', code.length, '| decoded code length:', decodedCode.length);
+    console.log('[TikTok] Starting token exchange with client_key:', client_key.substring(0, 8) + '...');
+        console.log('[TikTok] client_key length:', client_key.length);
+        console.log('[TikTok] redirect_uri:', redirect_uri);
 
-  // Log char codes of client_key to detect hidden chars
-  const keyCharCodes = Array.from(clientKey).map(c => c.charCodeAt(0));
-    console.log('[TikTok] client_key charCodes:', JSON.stringify(keyCharCodes));
-    // Log char codes of client_secret to detect hidden chars
-  const secretCharCodes = Array.from(clientSecret).map(c => c.charCodeAt(0));
-    console.log('[TikTok] client_secret charCodes:', JSON.stringify(secretCharCodes));
+    const tokenResponse = await axios.post(TOKEN_URL, params.toString(), {
+                headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'Cache-Control': 'no-cache',
+                },
+    });
 
-  const body = new URLSearchParams({
-        client_key: clientKey,
-        client_secret: clientSecret,
-        code: decodedCode,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-  }).toString();
+    const tokenData = tokenResponse.data;
+        console.log('[TikTok] Token exchange raw response:', JSON.stringify(tokenData));
 
-  console.log('[TikTok] Request body:', body);
-
-  let tokenRes: any;
-    try {
-          tokenRes = await axios.post(TOKEN_URL, body, {
-                  headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                  },
-          });
-    } catch (axiosErr: any) {
-          const status = axiosErr.response?.status;
-          const data = JSON.stringify(axiosErr.response?.data);
-          console.error(`[TikTok] Token request HTTP ${status}:`, data);
-          throw new Error(`TikTok token HTTP ${status}: ${data}`);
+    if (!tokenData.access_token) {
+                throw new Error(`TikTok token exchange returned no access_token: ${JSON.stringify(tokenData)}`);
     }
 
-  const rawData = tokenRes.data;
-    console.log('[TikTok] Token exchange raw response:', JSON.stringify(rawData));
-    const tokenData = (rawData.data && rawData.data.access_token) ? rawData.data : rawData;
-    const { access_token, refresh_token, expires_in } = tokenData;
+    const userResponse = await axios.get(`${USER_INFO_URL}?fields=open_id,display_name,avatar_url`, {
+                headers: {
+                                'Authorization': `Bearer ${tokenData.access_token}`,
+                },
+    });
 
-  if (!access_token) {
-        console.error('[TikTok] No access_token in response:', JSON.stringify(rawData));
-        throw new Error('TikTok token exchange returned no access_token: ' + JSON.stringify(rawData));
-  }
+    const userData = userResponse.data?.data?.user || {};
 
-  const userRes = await axios.get(
-        `${USER_INFO_URL}?fields=open_id,display_name`,
-    { headers: { Authorization: `Bearer ${access_token}` } },
-      );
-    const user = userRes.data?.data?.user;
-    if (!user?.open_id) throw new Error('TikTok user info missing open_id');
-
-  return {
-        platform: 'tiktok',
-        accountId: user.open_id,
-        accountName: user.display_name || 'TikTok Account',
-        accessToken: access_token,
-        refreshToken: refresh_token || '',
-        tokenExpires: expires_in
-          ? new Date(Date.now() + Number(expires_in) * 1000).toISOString()
-                : null,
-  };
+    return {
+                platform: 'tiktok',
+                accountId: userData.open_id || tokenData.open_id || '',
+                username: userData.display_name || '',
+                displayName: userData.display_name || '',
+                avatarUrl: userData.avatar_url || '',
+                accessToken: tokenData.access_token,
+                refreshToken: tokenData.refresh_token || '',
+                tokenExpiresAt: new Date(Date.now() + (tokenData.expires_in || 86400) * 1000),
+    };
 }
 
-export async function refreshTikTokToken(refreshToken: string) {
-    const clientKey = (process.env.TIKTOK_CLIENT_KEY || '').trim();
-    const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim();
+export async function refreshTikTokToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
+        const client_key = process.env.TIKTOK_CLIENT_KEY || '';
+        const client_secret = process.env.TIKTOK_CLIENT_SECRET || '';
 
-  const res = await axios.post(
-        TOKEN_URL,
-        new URLSearchParams({
-                client_key: clientKey,
-                client_secret: clientSecret,
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-        }).toString(),
-    {
-            headers: {
-                      'Content-Type': 'application/x-www-form-urlencoded',
-                      'Cache-Control': 'no-cache',
-            },
-    },
-      );
-    const rawData = res.data;
-    const tokenData = (rawData.data && rawData.data.access_token) ? rawData.data : rawData;
-    const { access_token, refresh_token, expires_in } = tokenData;
+    const params = new URLSearchParams();
+        params.append('client_key', client_key);
+        params.append('client_secret', client_secret);
+        params.append('grant_type', 'refresh_token');
+        params.append('refresh_token', refreshToken);
+
+    const response = await axios.post(TOKEN_URL, params.toString(), {
+                headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'Cache-Control': 'no-cache',
+                },
+    });
+
+    const data = response.data;
+        if (!data.access_token) {
+                    throw new Error(`TikTok token refresh failed: ${JSON.stringify(data)}`);
+        }
+
     return {
-          accessToken: access_token as string,
-          refreshToken: (refresh_token as string) || refreshToken,
-          tokenExpires: expires_in
-            ? new Date(Date.now() + Number(expires_in) * 1000).toISOString()
-                  : null,
+                accessToken: data.access_token,
+                refreshToken: data.refresh_token || refreshToken,
+                expiresAt: new Date(Date.now() + (data.expires_in || 86400) * 1000),
     };
 }
