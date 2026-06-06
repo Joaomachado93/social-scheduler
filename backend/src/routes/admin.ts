@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
 import { uploadToR2 } from '../services/storage.js';
 import { publishToTikTokInbox } from '../services/publishers/tiktok.js';
+import { generateYouTubeCaption } from '../services/captionAi.js';
 import { db } from '../db/index.js';
 import { posts, media, postPlatforms, platformAccounts, publishLogs } from '../db/schema.js';
 import { inArray, eq, desc } from 'drizzle-orm';
@@ -128,6 +129,24 @@ export async function adminRoutes(app: FastifyInstance) {
       return { ok: true, postId: result.id, scheduledAt, r2Key: key, sizeBytes: buf.length, platforms: platformsFilter };
     } catch (err: any) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
+      return reply.status(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // Preview the AI-generated YouTube caption for a given IG caption,
+  // without scheduling or publishing anything. Useful to sanity-check
+  // the system prompt and Claude output before the next cron tick.
+  app.post('/api/admin/preview-ai-caption', async (request, reply) => {
+    const secret = process.env.ADMIN_SECRET || '';
+    if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
+    const provided = (request.headers['x-admin-secret'] || '') as string;
+    if (provided !== secret) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const body = (request.body || {}) as { caption?: string };
+    try {
+      const ai = await generateYouTubeCaption(body.caption || '');
+      return { ok: true, ai };
+    } catch (err: any) {
       return reply.status(500).send({ ok: false, error: err.message });
     }
   });

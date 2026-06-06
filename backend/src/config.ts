@@ -38,6 +38,15 @@ export const config = {
     inboxMode: (process.env.TIKTOK_INBOX_MODE || 'false').toLowerCase() === 'true',
   },
 
+  // Claude API for AI-generated YouTube captions + hashtags. When the
+  // key is unset, the YouTube publisher falls back to using the IG
+  // caption verbatim.
+  ai: {
+    apiKey: (process.env.ANTHROPIC_API_KEY || '').trim(),
+    model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
+    enabled: !!(process.env.ANTHROPIC_API_KEY || '').trim(),
+  },
+
   watermark: {
     position: process.env.WATERMARK_POSITION || 'southeast',
     opacity: parseFloat(process.env.WATERMARK_OPACITY || '0.7'),

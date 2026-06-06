@@ -7,6 +7,7 @@ import { publishToFacebook } from './publishers/facebook.js';
 import { publishToInstagram, type PublisherMedia } from './publishers/instagram.js';
 import { publishToYouTube } from './publishers/youtube.js';
 import { publishToTikTok, publishToTikTokInbox } from './publishers/tiktok.js';
+import { generateYouTubeCaption } from './captionAi.js';
 import { getPublicUrl } from './storage.js';
 import { cleanupMediaForPost, cleanupOrphanedMedia } from './cleanup.js';
 import { runInstagramAutoSync } from './jobs/instagramAutoSync.js';
@@ -141,14 +142,33 @@ export async function publishPost(post: { id: number; caption: string | null; sc
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 95);
-          const title = cleanTitle || 'Untitled';
-          // Prepend #Shorts to the description so YT picks up the Shorts
-          // signal immediately. Vertical short videos already auto-classify,
-          // but the explicit tag boosts reach in the Shorts feed.
-          const rawDescription = post.caption || '';
-          const description = rawDescription.startsWith('#Shorts')
-            ? rawDescription
-            : `#Shorts\n\n${rawDescription}`.trimEnd();
+          let title = cleanTitle || 'Untitled';
+          let description: string;
+          if (config.ai.enabled) {
+            try {
+              const ai = await generateYouTubeCaption(post.caption || '');
+              const aiTitle = ai.title
+                .replace(/[​-‏‪-‮⁠-⁯﻿]/g, '')
+                .replace(/[<>]/g, '')
+                .trim()
+                .slice(0, 95);
+              if (aiTitle) title = aiTitle;
+              const hashtagLine = ai.hashtags.map(h => `#${h}`).join(' ');
+              description = `${ai.description}\n\n${hashtagLine}\n\n#Shorts`.trimEnd();
+              console.log(`[ai-caption] post ${post.id} → title="${title.slice(0,40)}…" tags=${ai.hashtags.length}`);
+            } catch (err: any) {
+              console.warn(`[ai-caption] post ${post.id} failed, falling back to IG caption:`, err.message);
+              const rawDescription = post.caption || '';
+              description = rawDescription.startsWith('#Shorts')
+                ? rawDescription
+                : `#Shorts\n\n${rawDescription}`.trimEnd();
+            }
+          } else {
+            const rawDescription = post.caption || '';
+            description = rawDescription.startsWith('#Shorts')
+              ? rawDescription
+              : `#Shorts\n\n${rawDescription}`.trimEnd();
+          }
           platformPostId = await publishToYouTube(
             account.id,
             account.accessToken,
