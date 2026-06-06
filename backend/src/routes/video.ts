@@ -1,4 +1,4 @@
-——import { FastifyInstance } from 'fastify';
+import { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { db } from '../db/index.js';
 import { platformAccounts } from '../db/schema.js';
