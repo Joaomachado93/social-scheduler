@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import axios from 'axios';
+import { eq as eqDrizzle } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
@@ -128,6 +129,40 @@ export async function adminRoutes(app: FastifyInstance) {
     } catch (err: any) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
       return reply.status(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // Query TikTok directly for the live status of a publish_id. Used to
+  // verify whether a SEND_TO_USER_INBOX response actually translated to a
+  // delivered draft, or whether sandbox quietly dropped it.
+  app.post('/api/admin/tiktok-status', async (request, reply) => {
+    const secret = process.env.ADMIN_SECRET || '';
+    if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
+    const provided = (request.headers['x-admin-secret'] || '') as string;
+    if (provided !== secret) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const body = (request.body || {}) as { publishId?: string };
+    if (!body.publishId) return reply.status(400).send({ error: 'publishId required' });
+
+    const [tt] = await db.select().from(platformAccounts)
+      .where(eqDrizzle(platformAccounts.platform, 'tiktok'))
+      .limit(1);
+    if (!tt) return reply.status(400).send({ error: 'No TikTok account connected' });
+
+    try {
+      const r = await axios.post(
+        'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
+        { publish_id: body.publishId },
+        { headers: { Authorization: `Bearer ${tt.accessToken}`, 'Content-Type': 'application/json' } },
+      );
+      return { ok: true, publishId: body.publishId, tiktokResponse: r.data };
+    } catch (err: any) {
+      return reply.status(500).send({
+        ok: false,
+        error: err.message,
+        body: err?.response?.data,
+        status: err?.response?.status,
+      });
     }
   });
 
