@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { publishToFacebook } from './publishers/facebook.js';
 import { publishToInstagram, type PublisherMedia } from './publishers/instagram.js';
 import { publishToYouTube } from './publishers/youtube.js';
-import { publishToTikTok } from './publishers/tiktok.js';
+import { publishToTikTok, publishToTikTokInbox } from './publishers/tiktok.js';
 import { getPublicUrl } from './storage.js';
 import { cleanupMediaForPost, cleanupOrphanedMedia } from './cleanup.js';
 import { runInstagramAutoSync } from './jobs/instagramAutoSync.js';
@@ -140,8 +140,9 @@ export async function publishPost(post: { id: number; caption: string | null; sc
           );
           break;
 
-        case 'tiktok':
-          platformPostId = await publishToTikTok({
+        case 'tiktok': {
+          const publish = config.tiktok.inboxMode ? publishToTikTokInbox : publishToTikTok;
+          platformPostId = await publish({
             platformAccountId: account.id,
             accessToken: account.accessToken,
             refreshToken: account.refreshToken,
@@ -150,6 +151,7 @@ export async function publishPost(post: { id: number; caption: string | null; sc
             mediaFiles: publisherMedia,
           });
           break;
+        }
 
         default:
           throw new Error(`Unknown platform: ${account.platform}`);

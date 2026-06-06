@@ -30,6 +30,12 @@ export const config = {
     clientKey: process.env.TIKTOK_CLIENT_KEY || '',
     clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
     redirectUri: process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3001/api/video/tiktok/callback',
+    // Interim path while the app is unaudited: upload to the user's TikTok
+    // inbox/drafts (no privacy_level restriction) instead of Direct Post.
+    // The user taps once in the TikTok mobile app to finalize each video.
+    // Flip to false once the app passes TikTok review and Direct Post can
+    // publish PUBLIC_TO_EVERYONE.
+    inboxMode: (process.env.TIKTOK_INBOX_MODE || 'false').toLowerCase() === 'true',
   },
 
   watermark: {
