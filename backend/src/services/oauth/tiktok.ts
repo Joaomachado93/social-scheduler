@@ -45,21 +45,6 @@ export async function exchangeTikTokCode(code: string): Promise<TikTokAccountInf
   const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim();
   const redirectUri = (process.env.TIKTOK_REDIRECT_URI || '').trim();
 
-  // Diagnostic: surface raw byte lengths so invisible chars (BOM, NBSP) show
-  // up as a length mismatch in logs without leaking the actual secret values.
-  console.log(
-    '[tiktok-exchange] lens',
-    JSON.stringify({
-      key_raw: (process.env.TIKTOK_CLIENT_KEY || '').length,
-      key_trim: clientKey.length,
-      sec_raw: (process.env.TIKTOK_CLIENT_SECRET || '').length,
-      sec_trim: clientSecret.length,
-      redir_raw: (process.env.TIKTOK_REDIRECT_URI || '').length,
-      redir_trim: redirectUri.length,
-      code_len: code.length,
-    }),
-  );
-
   const tokenRes = await postForm(TOKEN_URL, {
     client_key: clientKey,
     client_secret: clientSecret,
