@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
+import { config } from '../config.js';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
 import { uploadToR2 } from '../services/storage.js';
 import { db } from '../db/index.js';
@@ -10,6 +11,20 @@ import { inArray, eq, desc } from 'drizzle-orm';
 export async function adminRoutes(app: FastifyInstance) {
   // Manual trigger for the IG → YT+TikTok sync. Same logic as the 3am cron.
   // Protected by ADMIN_SECRET env var to avoid exposing on a public URL.
+  // Read-only snapshot of feature flags so polling jobs can detect when
+  // an env var has been toggled in Render and the new build is live.
+  app.get('/api/admin/config-snapshot', async (request, reply) => {
+    const secret = process.env.ADMIN_SECRET || '';
+    if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
+    const provided = (request.headers['x-admin-secret'] || '') as string;
+    if (provided !== secret) return reply.status(401).send({ error: 'Unauthorized' });
+    return {
+      tiktokInboxMode: config.tiktok.inboxMode,
+      igAutosyncEnabled: config.instagramAutoSync.enabled,
+      igUsername: config.instagramAutoSync.username,
+    };
+  });
+
   app.post('/api/admin/run-ig-sync', async (request, reply) => {
     const secret = process.env.ADMIN_SECRET || '';
     if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
