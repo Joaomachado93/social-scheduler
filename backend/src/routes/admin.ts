@@ -4,8 +4,8 @@ import { randomUUID } from 'crypto';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
 import { uploadToR2 } from '../services/storage.js';
 import { db } from '../db/index.js';
-import { posts, media, postPlatforms, platformAccounts } from '../db/schema.js';
-import { inArray } from 'drizzle-orm';
+import { posts, media, postPlatforms, platformAccounts, publishLogs } from '../db/schema.js';
+import { inArray, eq, desc } from 'drizzle-orm';
 
 export async function adminRoutes(app: FastifyInstance) {
   // Manual trigger for the IG → YT+TikTok sync. Same logic as the 3am cron.
@@ -104,5 +104,41 @@ export async function adminRoutes(app: FastifyInstance) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
       return reply.status(500).send({ ok: false, error: err.message });
     }
+  });
+
+  // Lightweight read-only status check used by smoke tests to know when a
+  // scheduled post finished publishing (or failed) without depending on a
+  // logged-in JWT.
+  app.get('/api/admin/post-status/:id', async (request, reply) => {
+    const secret = process.env.ADMIN_SECRET || '';
+    if (!secret) return reply.status(503).send({ error: 'ADMIN_SECRET not configured' });
+    const provided = (request.headers['x-admin-secret'] || '') as string;
+    if (provided !== secret) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const id = parseInt((request.params as { id: string }).id, 10);
+    if (!id) return reply.status(400).send({ error: 'invalid id' });
+
+    const [post] = await db.select().from(posts).where(eq(posts.id, id)).limit(1);
+    if (!post) return reply.status(404).send({ error: 'not found' });
+
+    const legs = await db.select({
+      id: postPlatforms.id,
+      status: postPlatforms.status,
+      platformPostId: postPlatforms.platformPostId,
+      errorMessage: postPlatforms.errorMessage,
+      publishedAt: postPlatforms.publishedAt,
+      platform: platformAccounts.platform,
+      accountName: platformAccounts.accountName,
+    })
+      .from(postPlatforms)
+      .innerJoin(platformAccounts, eq(platformAccounts.id, postPlatforms.platformAccountId))
+      .where(eq(postPlatforms.postId, id));
+
+    const logs = await db.select().from(publishLogs)
+      .where(eq(publishLogs.postId, id))
+      .orderBy(desc(publishLogs.createdAt))
+      .limit(20);
+
+    return { post, legs, logs };
   });
 }
