@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy — Social Scheduler</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 2.5rem auto; padding: 0 1.25rem; color: #1a1a1a; line-height: 1.55; }
+  h1 { font-size: 1.75rem; border-bottom: 1px solid #eee; padding-bottom: .5rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+  small { color: #666; }
+  ul { padding-left: 1.4rem; }
+  a { color: #0750c5; }
+</style>
+</head>
+<body>
+
+<h1>Privacy Policy — Social Scheduler</h1>
+<p><small>Last updated: 2026-06-06</small></p>
+
+<p>The Social Scheduler is a single-tenant tool operated solely by the owner of the <strong>Memes do Camões</strong> content brand (<code>@memesdocamoes2</code>). It is used to cross-post the operator's own original content from Instagram to TikTok and YouTube.</p>
+
+<h2>Data we store</h2>
+<p>For each connected TikTok account:</p>
+<ul>
+  <li><code>open_id</code> — TikTok's account identifier</li>
+  <li><code>display_name</code> — the account's public display name</li>
+  <li>OAuth <code>access_token</code> — used to call the Content Posting API on behalf of the user</li>
+  <li>OAuth <code>refresh_token</code> — used to renew the access token before expiry</li>
+  <li>Token expiry timestamp</li>
+</ul>
+<p>Storage: PostgreSQL database hosted on Neon (EU region), encrypted at rest by the managed provider. Tokens are used exclusively for publishing on behalf of the same user who authorized them.</p>
+
+<h2>Video content</h2>
+<p>Videos uploaded for publication are stored temporarily on a private Cloudflare R2 bucket. Files are deleted automatically once all target platforms have confirmed successful publication.</p>
+
+<h2>Sharing</h2>
+<p>No data is shared with third parties. No analytics, advertising, or tracking SDKs are included in the application.</p>
+
+<h2>Data deletion</h2>
+<p>To request deletion of an account and associated data, open an issue at <a href="https://github.com/Joaomachado93/social-scheduler/issues">github.com/Joaomachado93/social-scheduler/issues</a>, or disconnect the account via the in-app <code>/video/platforms</code> page, which triggers immediate removal of stored credentials.</p>
+
+<h2>Contact</h2>
+<p><a href="mailto:joao.machado@gomadevelopment.pt">joao.machado@gomadevelopment.pt</a></p>
+
+</body>
+</html>
