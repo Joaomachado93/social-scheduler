@@ -7,6 +7,7 @@ import type { PublisherMedia } from './instagram.js';
 
 const INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/video/init/';
 const STATUS_URL = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/';
+const CREATOR_INFO_URL = 'https://open.tiktokapis.com/v2/post/publish/creator_info/query/';
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS = 5 * 60_000;
@@ -39,12 +40,37 @@ export async function publishToTikTok(args: PublishToTikTokArgs): Promise<string
     : Math.max(MIN_CHUNK_SIZE, TARGET_CHUNK_SIZE);
   const totalChunkCount = Math.ceil(totalSize / chunkSize);
 
-  // 2. Init (with one auto-refresh retry on 401)
   let token = args.accessToken;
+
+  // 2a. Query creator info. TikTok rejects the init with 403 if the
+  // requested privacy_level isn't in the user's allowed list — that list
+  // depends on whether the app is audited and the user's account settings.
+  // We pick the first allowed level (typically SELF_ONLY in sandbox) so the
+  // publisher works in both sandbox and production without code changes.
+  let privacyLevel = 'SELF_ONLY';
+  try {
+    const ciRes = await axios.post(
+      CREATOR_INFO_URL,
+      {},
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' } },
+    );
+    const allowed: string[] = ciRes.data?.data?.privacy_level_options || [];
+    if (allowed.length > 0) {
+      privacyLevel = allowed.includes('SELF_ONLY') ? 'SELF_ONLY' : allowed[0];
+    }
+    console.log('[tiktok-publish] creator_info allowed=', JSON.stringify(allowed), 'chose=', privacyLevel);
+  } catch (err: any) {
+    const body = err?.response?.data;
+    console.error('[tiktok-publish] creator_info failed:',
+      err?.response?.status, JSON.stringify(body));
+    throw new Error(`TikTok creator_info failed (status ${err?.response?.status}): ${JSON.stringify(body)}`);
+  }
+
+  // 2b. Init (with one auto-refresh retry on 401, full-body error on others)
   const tryInit = async () => axios.post(INIT_URL, {
     post_info: {
       title: args.title || 'Untitled',
-      privacy_level: 'SELF_ONLY', // sandbox-safe default; flip to PUBLIC_TO_EVERYONE post-audit
+      privacy_level: privacyLevel,
       disable_duet: false,
       disable_comment: false,
       disable_stitch: false,
@@ -55,7 +81,7 @@ export async function publishToTikTok(args: PublishToTikTokArgs): Promise<string
       chunk_size: chunkSize,
       total_chunk_count: totalChunkCount,
     },
-  }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+  }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' } });
 
   let initRes;
   try {
@@ -71,13 +97,18 @@ export async function publishToTikTok(args: PublishToTikTokArgs): Promise<string
       }).where(eq(platformAccounts.id, args.platformAccountId));
       initRes = await tryInit();
     } else {
-      throw err;
+      const body = err?.response?.data;
+      console.error('[tiktok-publish] init failed:',
+        err?.response?.status, JSON.stringify(body));
+      throw new Error(`TikTok init failed (status ${err?.response?.status}): ${JSON.stringify(body)}`);
     }
   }
 
   const publishId = initRes.data?.data?.publish_id;
   const uploadUrl = initRes.data?.data?.upload_url;
-  if (!publishId || !uploadUrl) throw new Error('TikTok init returned no publish_id/upload_url');
+  if (!publishId || !uploadUrl) {
+    throw new Error(`TikTok init returned no publish_id/upload_url: ${JSON.stringify(initRes.data)}`);
+  }
 
   // 3. Upload chunks
   for (let i = 0; i < totalChunkCount; i++) {

@@ -41,6 +41,9 @@ describe('publishToTikTok', () => {
     vi.mocked(axios.get).mockResolvedValueOnce({ data: videoBytes.buffer.slice(0, videoBytes.length) } as any);
 
     vi.mocked(axios.post).mockImplementation(async (url: string, body: any) => {
+      if (url.endsWith('/v2/post/publish/creator_info/query/')) {
+        return { data: { data: { privacy_level_options: ['SELF_ONLY', 'PUBLIC_TO_EVERYONE'] } } } as any;
+      }
       if (url.endsWith('/v2/post/publish/video/init/')) {
         return { data: { data: { publish_id: 'PUB123', upload_url: 'https://upload.tiktok/UPL' } } } as any;
       }
@@ -72,6 +75,7 @@ describe('publishToTikTok', () => {
     vi.mocked(axios.get).mockResolvedValueOnce({ data: Buffer.alloc(1024).buffer } as any);
     vi.mocked(axios.put).mockResolvedValueOnce({ status: 201 } as any);
     vi.mocked(axios.post).mockImplementation(async (url: string) => {
+      if (url.endsWith('/creator_info/query/')) return { data: { data: { privacy_level_options: ['SELF_ONLY'] } } } as any;
       if (url.endsWith('/init/')) return { data: { data: { publish_id: 'P', upload_url: 'U' } } } as any;
       return { data: { data: { status: 'FAILED', fail_reason: 'bad_codec' } } } as any;
     });
@@ -91,6 +95,7 @@ describe('publishToTikTok', () => {
 
     let initCalls = 0;
     vi.mocked(axios.post).mockImplementation(async (url: string) => {
+      if (url.endsWith('/creator_info/query/')) return { data: { data: { privacy_level_options: ['SELF_ONLY'] } } } as any;
       if (url.endsWith('/init/')) {
         initCalls++;
         if (initCalls === 1) {
