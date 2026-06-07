@@ -1,0 +1,32 @@
+name: Keep Render Awake
+
+# Render free tier suspends the service after a stretch of zero traffic,
+# which kills the in-memory node-cron and makes scheduled posts publish
+# hours late (or not at all). Pinging /api/health every 5 minutes keeps
+# the dyno warm so the publish cron and the 3am IG sync both fire on time.
+#
+# Cost: ~12 invocations/hour × 24h × 30d = ~8,640 runs/month. Each run is
+# a single curl + tiny YAML overhead (~20s). For a public repo this is
+# free; for a private repo it eats ~3,000 min/month — outside the 2,000
+# free quota. Make the repo public if you're on a free GH plan.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping /api/health
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://social-scheduler-backend-e3c1.onrender.com/api/health)
+          echo "Response: $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::Non-200 response: $code"
+          fi

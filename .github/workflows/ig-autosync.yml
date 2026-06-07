@@ -1,0 +1,40 @@
+name: Instagram Auto-Sync
+
+# Belt-and-suspenders trigger for the IG → YT + TikTok auto-sync. The
+# Render backend already has an internal cron at "0 3 * * *" Europe/Lisbon,
+# but the free tier sleeps between requests, which means the internal
+# cron can be missed if the service was idle during the firing window.
+# This workflow fires the same job from GitHub Actions so the sync runs
+# every night even if Render was asleep.
+#
+# Cron is in UTC. 02:00 UTC ≈ 03:00 Lisbon during DST (summer), ≈ 02:00
+# Lisbon outside DST. Either way it's the middle of the night, when IG's
+# rate limiter is most forgiving on the Render IP.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ig-autosync
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/admin/run-ig-sync
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          if [ -z "$ADMIN_SECRET" ]; then
+            echo "::error::ADMIN_SECRET repo secret is not configured"
+            exit 1
+          fi
+          resp=$(curl -sS -X POST \
+            https://social-scheduler-backend-e3c1.onrender.com/api/admin/run-ig-sync \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            --max-time 240)
+          echo "Response: $resp"
+          echo "$resp" | grep -q '"ok":true' || { echo "::error::Sync did not return ok:true"; exit 1; }
