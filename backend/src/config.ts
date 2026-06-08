@@ -72,7 +72,11 @@ export const config = {
     spacingHours: parseInt(process.env.IG_AUTOSYNC_SPACING_HOURS || '2', 10),
     minDelayMinutes: parseInt(process.env.IG_AUTOSYNC_MIN_DELAY_MINUTES || '60', 10),
     windowStartHour: parseInt(process.env.IG_AUTOSYNC_WINDOW_START_HOUR || '8', 10),
-    windowEndHour: parseInt(process.env.IG_AUTOSYNC_WINDOW_END_HOUR || '22', 10),
+    // Default end-hour is 18 (not 22) so the daily slot count stays at 6
+    // — exactly what the YT Data API quota allows: 10_000 units/day ÷
+    // 1600 units per `videos.insert` = 6 uploads/day. Raising this needs
+    // either a quota increase from Google or a second Google Cloud project.
+    windowEndHour: parseInt(process.env.IG_AUTOSYNC_WINDOW_END_HOUR || '18', 10),
   },
 
   r2: {

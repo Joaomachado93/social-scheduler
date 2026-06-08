@@ -15,6 +15,7 @@ export async function publishToYouTube(
   title: string,
   description: string,
   mediaFiles: PublisherMedia[],
+  publishAt?: string | null,
 ): Promise<string> {
 
   const videos = mediaFiles.filter(m => m.mediaType === 'video');
@@ -60,9 +61,20 @@ export async function publishToYouTube(
         title: title || 'Untitled',
         description: description || '',
       },
-      status: {
-        privacyStatus: 'public',
-      },
+      // Native YouTube scheduling: upload as private NOW with publishAt set,
+      // YT promotes to public at that timestamp on its own. Lets the
+      // backend dyno sleep between uploads — YT becomes the timer source.
+      // Falls back to immediate public upload when publishAt isn't provided.
+      status: publishAt
+        ? {
+            privacyStatus: 'private',
+            publishAt,
+            selfDeclaredMadeForKids: false,
+          }
+        : {
+            privacyStatus: 'public',
+            selfDeclaredMadeForKids: false,
+          },
     },
     media: {
       body,

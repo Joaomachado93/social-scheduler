@@ -22,6 +22,8 @@ import {
   downloadAndStoreInR2,
   type IgMediaItem,
 } from '../importers/instagram.js';
+import { scheduleYouTubeNative } from '../publishers/youtubeNativeSchedule.js';
+import { getPublicUrl } from '../storage.js';
 
 type Account = typeof platformAccounts.$inferSelect;
 
@@ -191,7 +193,7 @@ async function importVideoForUser(
     igMediaId: video.id,
   });
 
-  await db.transaction(async (tx) => {
+  const { postId, ytLegId } = await db.transaction(async (tx) => {
     const inserted = await tx.insert(posts).values({
       userId: target.userId,
       caption: video.caption ?? '',
@@ -213,10 +215,11 @@ async function importVideoForUser(
       processingStatus: 'done',
     });
 
-    await tx.insert(postPlatforms).values([
+    const insertedLegs = await tx.insert(postPlatforms).values([
       { postId: post.id, platformAccountId: target.yt.id },
       { postId: post.id, platformAccountId: target.tiktok.id },
-    ]);
+    ]).returning();
+    const ytLeg = insertedLegs.find((l) => l.platformAccountId === target.yt.id);
 
     await tx.insert(instagramImports).values({
       userId: target.userId,
@@ -224,7 +227,31 @@ async function importVideoForUser(
       igPermalink: video.permalink ?? null,
       postId: post.id,
     });
+
+    return { postId: post.id, ytLegId: ytLeg!.id };
   });
+
+  // Native YT scheduling: upload to YT now with publishAt = scheduledAtIso,
+  // so YT handles the public-release timing and the Render dyno can sleep
+  // until the next nightly sync. The TikTok leg stays `pending` and the
+  // in-memory cron in scheduler.ts picks it up at scheduledAt.
+  try {
+    const youtubeId = await scheduleYouTubeNative({
+      platformAccountId: target.yt.id,
+      accessToken: target.yt.accessToken,
+      refreshToken: target.yt.refreshToken,
+      caption: video.caption ?? '',
+      publicUrl: getPublicUrl(stored.key),
+      scheduledAtIso,
+      mimeType: stored.mimeType,
+    });
+    await db.update(postPlatforms)
+      .set({ status: 'published', platformPostId: youtubeId, publishedAt: scheduledAtIso })
+      .where(eq(postPlatforms.id, ytLegId));
+    console.log(`[ig-auto-sync] user ${target.userId}: YT ${youtubeId} scheduled for ${scheduledAtIso} (post ${postId})`);
+  } catch (err: any) {
+    console.warn(`[ig-auto-sync] user ${target.userId}: native YT schedule failed for post ${postId}, leaving leg pending for cron:`, err?.message || err);
+  }
 }
 
 async function syncOneUser(

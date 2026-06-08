@@ -34,6 +34,13 @@ vi.mock('../services/importers/instagram.js', () => ({
   downloadAndStoreInR2: vi.fn(),
 }));
 
+// Stub the YT native scheduler so tests don't hit the Google API. The
+// existing tests assert only on DB rows (posts/media/postPlatforms),
+// the YT call itself is covered by youtubeNativeSchedule.test.ts (TODO).
+vi.mock('../services/publishers/youtubeNativeSchedule.js', () => ({
+  scheduleYouTubeNative: vi.fn().mockResolvedValue('yt-stub-id'),
+}));
+
 import { setupTestDb, teardownTestDb } from './setup.js';
 import bcrypt from 'bcrypt';
 import { users, platformAccounts, posts, postPlatforms, media, instagramImports } from '../db/schema.js';

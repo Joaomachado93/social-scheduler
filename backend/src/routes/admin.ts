@@ -6,7 +6,9 @@ import { config } from '../config.js';
 import { runInstagramAutoSync } from '../services/jobs/instagramAutoSync.js';
 import { uploadToR2 } from '../services/storage.js';
 import { publishToTikTokInbox } from '../services/publishers/tiktok.js';
+import { scheduleYouTubeNative } from '../services/publishers/youtubeNativeSchedule.js';
 import { generateYouTubeCaption } from '../services/captionAi.js';
+import { getPublicUrl } from '../services/storage.js';
 import { db } from '../db/index.js';
 import { posts, media, postPlatforms, platformAccounts, publishLogs } from '../db/schema.js';
 import { inArray, eq, desc } from 'drizzle-orm';
@@ -99,7 +101,7 @@ export async function adminRoutes(app: FastifyInstance) {
       const scheduledAt = body.scheduledAtIso
         ?? new Date(Date.now() + (body.scheduleInSeconds ?? 120) * 1000).toISOString();
 
-      const result = await db.transaction(async (tx) => {
+      const insertResult = await db.transaction(async (tx) => {
         const [post] = await tx.insert(posts).values({
           userId: userId!,
           caption: body.caption || '',
@@ -121,12 +123,52 @@ export async function adminRoutes(app: FastifyInstance) {
         const legs: { postId: number; platformAccountId: number }[] = [];
         if (wantYt && yt) legs.push({ postId: post.id, platformAccountId: yt.id });
         if (wantTt && tt) legs.push({ postId: post.id, platformAccountId: tt.id });
-        if (legs.length > 0) await tx.insert(postPlatforms).values(legs);
+        const insertedLegs = legs.length > 0
+          ? await tx.insert(postPlatforms).values(legs).returning()
+          : [];
 
-        return post;
+        return { post, legs: insertedLegs };
       });
+      const { post: createdPost, legs: createdLegs } = insertResult;
 
-      return { ok: true, postId: result.id, scheduledAt, r2Key: key, sizeBytes: buf.length, platforms: platformsFilter };
+      let youtubeId: string | null = null;
+      const ytLeg = createdLegs.find((l: any) => l.platformAccountId === yt?.id);
+      if (wantYt && yt && ytLeg) {
+        try {
+          youtubeId = await scheduleYouTubeNative({
+            platformAccountId: yt.id,
+            accessToken: yt.accessToken,
+            refreshToken: yt.refreshToken,
+            caption: body.caption || '',
+            publicUrl: getPublicUrl(key),
+            scheduledAtIso: scheduledAt,
+          });
+          await db.update(postPlatforms)
+            .set({ status: 'published', platformPostId: youtubeId, publishedAt: scheduledAt })
+            .where(eqDrizzle(postPlatforms.id, ytLeg.id));
+          // If only YT was queued, mark the post as scheduled — it'll go
+          // public at scheduledAt on YT's side.
+          if (!wantTt) {
+            await db.update(posts).set({ status: 'scheduled' }).where(eqDrizzle(posts.id, createdPost.id));
+          }
+        } catch (err: any) {
+          app.log.error({ err: err.message }, 'native YT schedule failed; leaving leg pending for cron');
+          await db.update(postPlatforms)
+            .set({ status: 'failed', errorMessage: err.message })
+            .where(eqDrizzle(postPlatforms.id, ytLeg.id));
+        }
+      }
+
+      return {
+        ok: true,
+        postId: createdPost.id,
+        scheduledAt,
+        r2Key: key,
+        sizeBytes: buf.length,
+        platforms: platformsFilter,
+        youtubeId,
+        nativeYtScheduled: !!youtubeId,
+      };
     } catch (err: any) {
       app.log.error({ err: err.message }, 'schedule-test-post failed');
       return reply.status(500).send({ ok: false, error: err.message });
